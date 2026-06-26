@@ -1,16 +1,23 @@
 from daytona import Daytona
 
+SNAPSHOT_NAME = "elec-forecast-v2"
+
 daytona = Daytona()
 sb = daytona.create()
 
-# 把你的專案拉進去（需要 repo 是 public）
-sb.process.exec("git clone https://github.com/YOUR/electricity-price-forecasting /workspace/project")
-sb.process.exec("pip install lightgbm pandas scikit-learn pyarrow numpy")
+r = sb.process.exec("pip install lightgbm pandas scikit-learn pyarrow numpy -q")
+if r.exit_code != 0:
+    sb.delete()
+    raise RuntimeError(f"pip install failed (exit {r.exit_code}): {r.result}")
+print("pip install OK")
 
-# 驗證資料可以讀
-resp = sb.process.exec("python -c \"import pandas as pd; df=pd.read_parquet('/workspace/project/data/processed/features_2020_2024.parquet'); print(len(df))\"")
-print("Rows:", resp.result)
+# Verify packages are importable
+r = sb.process.exec("python -c \"import lightgbm, pandas, sklearn, pyarrow; print('packages OK')\"")
+if r.exit_code != 0:
+    sb.delete()
+    raise RuntimeError(f"Package verification failed: {r.result}")
+print(r.result.strip())
 
-sb._experimental_create_snapshot("elec-forecast-v1")
+sb._experimental_create_snapshot(SNAPSHOT_NAME)
 sb.delete()
-print("Snapshot ready.")
+print(f"Snapshot '{SNAPSHOT_NAME}' ready.")

@@ -1,4 +1,4 @@
-import json, argparse
+import json, argparse, os
 import pandas as pd
 import lightgbm as lgb
 from sklearn.metrics import mean_absolute_error
@@ -21,12 +21,12 @@ args = parser.parse_args()
 with open(args.config) as f:
     params = json.load(f)
 
-df       = pd.read_parquet("/workspace/project/data/processed/features_2020_2024.parquet")
+df       = pd.read_parquet(os.path.expanduser("~/project/data/features_2020_2024.parquet"))
 train_df = df[df["timestamp"] <= TRAIN_END]
 val_df   = df[(df["timestamp"] > TRAIN_END) & (df["timestamp"] <= VAL_END)]
 test_df  = df[df["timestamp"] > VAL_END]
 
-# Stage 1：只用 15% 訓練資料（快速篩選）
+# Stage 1: use only the most recent 15% of training data for fast screening
 if args.stage == 1:
     train_df = train_df.tail(int(len(train_df) * 0.15))
 

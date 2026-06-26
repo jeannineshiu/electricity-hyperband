@@ -2,9 +2,9 @@ import json, random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from daytona import Daytona, CreateSandboxFromSnapshotParams
 
-SNAPSHOT  = "elec-forecast-v1"
-N_STAGE1  = 20
-TOP_K     = 6
+SNAPSHOT  = "elec-forecast-v2"
+N_STAGE1  = 9
+TOP_K     = 3
 BASELINE  = 7.23
 
 daytona = Daytona()
@@ -24,17 +24,28 @@ def sample_params():
 def run_sandbox(params, stage):
     sb = daytona.create(CreateSandboxFromSnapshotParams(snapshot=SNAPSHOT))
     try:
-        # 用 code_run 寫 config（比 echo 安全，不會被特殊字元爆掉）
+        # Clone project code on every sandbox (snapshot preserves pip packages only)
+        clone_resp = sb.process.exec(
+            "git clone https://github.com/jeannineshiu/electricity-hyperband $HOME/project"
+        )
+        if clone_resp.exit_code != 0:
+            raise RuntimeError(f"git clone failed: {clone_resp.result}")
+
+        # Write config via code_run to avoid shell escaping issues with special characters
         sb.process.code_run(f"""
 import json
 with open('/tmp/config.json', 'w') as f:
     json.dump({params}, f)
 """)
-        sb.process.exec(
-            "python /workspace/project/sandbox_train.py "
+        train_resp = sb.process.exec(
+            "python $HOME/project/sandbox_train.py "
             f"--config /tmp/config.json --stage {stage}"
         )
+        if train_resp.exit_code != 0:
+            raise RuntimeError(f"sandbox_train.py failed (exit {train_resp.exit_code}): {train_resp.result}")
         resp = sb.process.exec("cat /tmp/result.json")
+        if not resp.result or not resp.result.strip():
+            raise RuntimeError("result.json is empty")
         return json.loads(resp.result)
     finally:
         sb.delete()
@@ -47,9 +58,12 @@ s1_results = []
 with ThreadPoolExecutor(max_workers=N_STAGE1) as ex:
     futures = {ex.submit(run_sandbox, cfg, 1): cfg for cfg in configs}
     for f in as_completed(futures):
-        r = f.result()
-        s1_results.append(r)
-        print(f"  val_mae={r['val_mae']:.4f}")
+        try:
+            r = f.result()
+            s1_results.append(r)
+            print(f"  val_mae={r['val_mae']:.4f}")
+        except Exception as e:
+            print(f"  [SKIP] sandbox failed: {e}")
 
 s1_results.sort(key=lambda x: x["val_mae"])
 survivors = s1_results[:TOP_K]
@@ -62,12 +76,17 @@ s2_results = []
 with ThreadPoolExecutor(max_workers=TOP_K) as ex:
     futures = [ex.submit(run_sandbox, r["params"], 2) for r in survivors]
     for f in as_completed(futures):
-        r = f.result()
-        s2_results.append(r)
-        print(f"  test_mae={r['test_mae']:.4f}")
+        try:
+            r = f.result()
+            s2_results.append(r)
+            print(f"  test_mae={r['test_mae']:.4f}")
+        except Exception as e:
+            print(f"  [SKIP] stage2 sandbox failed: {e}")
 
+if not s2_results:
+    raise RuntimeError("All Stage 2 sandboxes failed, no results to compare.")
 best = min(s2_results, key=lambda x: x["test_mae"])
 print(f"\n{'='*45}")
 print(f"Baseline (Optuna 30 trials, sequential) : {BASELINE}")
-print(f"Hyperband search (20→6, parallel)       : {best['test_mae']:.4f}")
+print(f"Hyperband search (9→3, parallel)        : {best['test_mae']:.4f}")
 print(f"Delta                                   : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
