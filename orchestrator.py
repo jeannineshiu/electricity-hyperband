@@ -1,4 +1,4 @@
-import json, random
+import json, random, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from daytona import Daytona, CreateSandboxFromSnapshotParams
 
@@ -83,6 +83,7 @@ def run_parallel(configs, stage):
     return results
 
 # ── Stage 1: 2 batches × 9 sandboxes × 10% data ──────────────
+t_start = time.time()
 n_total = N_BATCH * N_BATCHES
 print(f"Stage 1: {N_BATCHES} batches × {N_BATCH} sandboxes × 10% data  ({n_total} configs total)")
 all_s1 = []
@@ -119,7 +120,11 @@ if not s3_results:
     raise RuntimeError("All Stage 3 sandboxes failed.")
 best = min(s3_results, key=lambda x: x["test_mae"])
 
+elapsed = time.time() - t_start
+mins, secs = divmod(int(elapsed), 60)
+
 print(f"\n{'='*50}")
+print(f"Total wall-clock time                    : {mins}m {secs}s")
 print(f"Total configs explored                   : {n_total}")
 print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
 print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
