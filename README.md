@@ -191,9 +191,11 @@ export DAYTONA_API_KEY="your-api-key"
 
 Select model, click **▶ Start**. The leaderboard updates live as each sandbox completes.
 
-| Start | Running | Complete |
-|:---:|:---:|:---:|
-| ![Dashboard start](docs/screenshots/dashboard_01.png) | ![Dashboard running](docs/screenshots/dashboard_02.png) | ![Dashboard complete](docs/screenshots/dashboard_03.png) |
+![Dashboard](docs/screenshots/dashboard_01.png)
+
+![Dashboard](docs/screenshots/dashboard_02.png)
+
+![Dashboard](docs/screenshots/dashboard_03.png)
 
 ---
 
