@@ -16,7 +16,7 @@ That project established the ENTSO-E data pipeline, LightGBM feature engineering
 
 ## Overview
 
-This project implements a **3-stage Hyperband hyperparameter search** for LightGBM electricity price forecasting, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes.
+This project implements a **3-stage Hyperband hyperparameter search** for LightGBM electricity price forecasting, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes, with **MLflow** for full experiment tracking and observability.
 
 Instead of evaluating hyperparameter configurations one by one (like Optuna), we spin up multiple sandboxes simultaneously — each training a different configuration — and progressively eliminate the worst performers across three stages.
 
@@ -33,18 +33,38 @@ Instead of evaluating hyperparameter configurations one by one (like Optuna), we
 
 ---
 
-## Architecture
+## System Architecture
 
 ```
-Stage 1 — Fast Screen (10% of training data)
-  4 batches × 9 sandboxes = 36 configs explored in parallel
-  → Keep Top 9
+┌─────────────────────────────────────────────────────┐
+│                   orchestrator.py                   │
+│              (runs on local machine)                │
+│                                                     │
+│  ThreadPoolExecutor → 9 Daytona sandboxes at once  │
+│                       ↓                            │
+│              MLflow tracking (localhost)            │
+└─────────────────────────────────────────────────────┘
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+   [Sandbox 1]   [Sandbox 2]  ... [Sandbox 9]
+   git clone      git clone        git clone
+   sandbox_train  sandbox_train    sandbox_train
+   → result.json  → result.json   → result.json
+```
 
-Stage 2 — Medium Evaluation (33% of training data)
-  10 sandboxes in parallel (Top 9 from Stage 1 + 1 seed)
+### 3-Stage Hyperband
+
+```
+Stage 1 — Fast Screen (10% of training data, early_stop=10)
+  4 batches × 9 sandboxes = 36 configs explored in parallel
   → Keep Top 5
 
-Stage 3 — Full Training (100% of training data)
+Stage 2 — Medium Evaluation (33% of training data, early_stop=30)
+  10 sandboxes in parallel (Top 5 from Stage 1 + 5 seeds)
+  → Keep Top 5
+
+Stage 3 — Full Training (100% of training data, early_stop=100)
   5 sandboxes in parallel
   → Best config wins
 ```
@@ -85,9 +105,15 @@ Each stage uses progressively more data. Configs that perform poorly are elimina
 
 ```
 electricity-hyperband/
-├── orchestrator.py      # Main Hyperband loop — controls all sandboxes
-├── sandbox_train.py     # Training script that runs inside each sandbox
-├── setup_snapshot.py    # One-time setup: creates the Daytona snapshot
+├── orchestrator.py           # Main Hyperband loop — controls all sandboxes
+├── orchestrator_lstm.py      # LSTM variant of Hyperband
+├── sandbox_train.py          # LightGBM training script (runs inside sandbox)
+├── sandbox_train_lstm.py     # LSTM training script (runs inside sandbox)
+├── setup_snapshot.py         # One-time setup: LightGBM Daytona snapshot
+├── setup_snapshot_lstm.py    # One-time setup: LSTM Daytona snapshot
+├── tracking/
+│   ├── __init__.py
+│   └── mlflow_logger.py      # MLflow experiment tracking helpers
 └── data/
     └── features_2020_2024.parquet
 ```
@@ -111,25 +137,29 @@ python orchestrator.py
 ```
 
 The orchestrator:
-1. Spawns 9 sandboxes in parallel for each Stage 1 batch
-2. Each sandbox clones the repo, writes its config, and runs `sandbox_train.py`
-3. Results are collected, sorted by `val_mae`, and the worst configs are eliminated
-4. Survivors advance to the next stage with more training data
+1. Starts an MLflow parent run (`hyperband_search`)
+2. Spawns 9 sandboxes in parallel for each Stage 1 batch
+3. Each sandbox clones the repo, writes its config, and runs `sandbox_train.py`
+4. Results are collected, logged to MLflow, sorted by `val_mae`, and worst configs are eliminated
+5. Survivors advance to the next stage with more training data
 
-### 3. Stage-aware early stopping
+### 3. View experiment results in MLflow
 
-| Stage | Data | Early Stopping Rounds |
-|---|---|---|
-| Stage 1 | 10% | 10 |
-| Stage 2 | 33% | 30 |
-| Stage 3 | 100% | 100 |
+```bash
+mlflow ui --port 5001
+# Open http://localhost:5001
+```
+
+Each Hyperband run creates:
+- A **parent run** with search configuration and final best metrics
+- **Nested trial runs** for every sandbox, each with full hyperparameters and stage-level MAE
 
 ---
 
 ## Requirements
 
 ```bash
-pip install daytona lightgbm pandas scikit-learn pyarrow numpy
+pip install daytona lightgbm pandas scikit-learn pyarrow numpy mlflow
 ```
 
 Set your Daytona API key:
@@ -144,11 +174,41 @@ export DAYTONA_API_KEY="your-api-key"
 
 | Feature | Usage |
 |---|---|
-| **Sandbox from Snapshot** | Pre-installed packages, instant startup |
-| **Parallel sandboxes** | Up to 9 simultaneous training jobs |
+| **Sandbox from Snapshot** | Pre-installed packages, instant startup — setup cost paid once |
+| **Parallel sandboxes** | Up to 9 simultaneous training jobs per batch |
 | **`process.code_run()`** | Write config safely without shell escaping issues |
 | **`process.exec()`** | Run training script and collect results |
-| **Auto cleanup** | `sb.delete()` in `finally` block — no wasted resources |
+| **Auto cleanup** | `sb.delete()` in `finally` block — no idle costs |
+| **Fault isolation** | One sandbox crash does not affect others — `[SKIP]` pattern |
+
+---
+
+## MLflow Tracking
+
+Every Hyperband run is fully logged to MLflow:
+
+| What is tracked | Where |
+|---|---|
+| Search config (`n_batches`, `top_s2`, `top_s3`, `baseline`) | Parent run — params |
+| Each trial's full hyperparameters | Nested run — params |
+| `val_mae` and `test_mae` per trial | Nested run — metrics |
+| Stage and batch tags | Nested run — tags |
+| Best params, best MAE, improvement, wall-clock time | Parent run — metrics |
+
+Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) for easy navigation in the UI.
+
+---
+
+## Why Daytona?
+
+| Property | What it means in practice |
+|---|---|
+| **Isolation** | Each sandbox is an independent environment — no package conflicts, one crash doesn't cascade |
+| **Snapshot** | Environment setup cost is paid once, not once per trial |
+| **Ephemeral Compute** | `sb.delete()` after training — no idle servers, pay for seconds used |
+| **Reproducibility** | Same snapshot + same code = identical environment, reproducible results |
+| **Scalability** | Change `N_BATCH = 9` to `N_BATCH = 90` — orchestrator code stays the same |
+| **Fault Tolerance** | Failed sandboxes are skipped, search continues with remaining results |
 
 ---
 
@@ -164,8 +224,20 @@ export DAYTONA_API_KEY="your-api-key"
   "colsample_bytree": 0.89,
   "min_child_samples": 36,
   "reg_alpha": 1.26,
-  "reg_lambda": 1.96
+  "reg_lambda": 1.96,
+  "random_state": 42
 }
 ```
 
 **Test MAE: 7.1754 EUR/MWh**
+
+---
+
+## Roadmap
+
+- [x] 3-stage Hyperband with Daytona parallel sandboxes
+- [x] MLflow experiment tracking
+- [ ] Real-time dashboard (Streamlit)
+- [ ] Generic model interface (LightGBM / XGBoost / CatBoost / Random Forest)
+- [ ] LLM-powered ML agent (diagnose → suggest → re-run)
+- [ ] Full forecasting platform (upload CSV → auto HPO → deploy API → monitor drift)
