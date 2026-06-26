@@ -105,8 +105,12 @@ val_loader = DataLoader(
     batch_size=512, shuffle=False,
 )
 
+# ── Device (use GPU if available) ────────────────────────────
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"device: {device}", flush=True)
+
 # ── Model / optimizer ────────────────────────────────────────
-model     = LSTMModel(len(FEATURE_COLS), hidden_size, num_layers, dropout)
+model     = LSTMModel(len(FEATURE_COLS), hidden_size, num_layers, dropout).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 criterion = nn.L1Loss()
 
@@ -118,19 +122,21 @@ no_improve    = 0
 for epoch in range(max_epochs):
     model.train()
     for xb, yb in train_loader:
+        xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
         criterion(model(xb), yb).backward()
         optimizer.step()
 
     model.eval()
     with torch.no_grad():
-        preds  = torch.cat([model(xb) for xb, _ in val_loader]).numpy()
-        truths = y_v_s
-        val_loss = float(np.mean(np.abs(preds - truths)))
+        preds = torch.cat([
+            model(xb.to(device)).cpu() for xb, _ in val_loader
+        ]).numpy()
+        val_loss = float(np.mean(np.abs(preds - y_v_s)))
 
     if val_loss < best_val_loss:
         best_val_loss = val_loss
-        best_state    = {k: v.clone() for k, v in model.state_dict().items()}
+        best_state    = {k: v.cpu().clone() for k, v in model.state_dict().items()}
         no_improve    = 0
     else:
         no_improve += 1
@@ -139,11 +145,14 @@ for epoch in range(max_epochs):
 
 # ── Evaluate with best weights ───────────────────────────────
 model.load_state_dict(best_state)
+model.to(device)
 model.eval()
 
 def predict_mae(X_seq, y_true_scaled):
     with torch.no_grad():
-        preds_scaled = model(torch.from_numpy(X_seq)).numpy()
+        preds_scaled = model(
+            torch.from_numpy(X_seq).to(device)
+        ).cpu().numpy()
     preds = scaler_y.inverse_transform(preds_scaled.reshape(-1, 1)).ravel()
     truth = scaler_y.inverse_transform(y_true_scaled.reshape(-1, 1)).ravel()
     return float(mean_absolute_error(truth, preds))

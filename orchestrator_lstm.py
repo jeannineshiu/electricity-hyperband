@@ -61,9 +61,9 @@ def run_parallel(configs, stage):
             try:
                 r = f.result()
                 results.append(r)
-                print(f"    stage={stage} val_mae={r['val_mae']:.4f}")
+                print(f"    stage={stage} val_mae={r['val_mae']:.4f}", flush=True)
             except Exception as e:
-                print(f"    [SKIP] {e}")
+                print(f"    [SKIP] {e}", flush=True)
     return results
 
 
