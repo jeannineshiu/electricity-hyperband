@@ -7,7 +7,7 @@ REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
 N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
 N_BATCHES = 4   # Stage 1 batches → 36 configs total
 TOP_S2    = 6   # top configs advancing to Stage 2
-TOP_S3    = 3   # top configs advancing to Stage 3
+TOP_S3    = 5   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
 # Known good configs from previous runs — always included in Stage 2
@@ -18,10 +18,10 @@ daytona = Daytona()
 
 def sample_params():
     return {
-        # More trees with lower LR → better generalization
-        "n_estimators":      random.choice([500, 800, 1000, 1500, 2000]),
-        "max_depth":         random.randint(3, 6),          # shallower trees reduce overfitting
-        "learning_rate":     random.choice([0.005, 0.01, 0.03, 0.05]),
+        # Low LR + many trees → better generalization to 2024
+        "n_estimators":      random.choice([1000, 1500, 2000, 3000, 5000]),
+        "max_depth":         random.randint(3, 6),
+        "learning_rate":     random.choice([0.003, 0.005, 0.01, 0.02, 0.03]),
         "num_leaves":        random.randint(15, 63),        # cap at 63 (2^6-1) for depth-6 trees
         "subsample":         round(random.uniform(0.6, 0.9), 2),
         "colsample_bytree":  round(random.uniform(0.6, 0.9), 2),
