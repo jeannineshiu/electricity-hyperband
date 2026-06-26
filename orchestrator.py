@@ -6,13 +6,19 @@ SNAPSHOT  = "elec-forecast-v2"
 REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
 N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
 N_BATCHES = 4   # Stage 1 batches → 36 configs total
-TOP_S2    = 6   # top configs advancing to Stage 2
+TOP_S2    = 9   # top configs advancing to Stage 2 (wider funnel = less premature elimination)
 TOP_S3    = 5   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
 # Known good configs from previous runs — always included in Stage 2
-# Paste best params output here after each successful run
-SEED_PARAMS = []
+SEED_PARAMS = [
+    {
+        "n_estimators": 2000, "max_depth": 5, "learning_rate": 0.02,
+        "num_leaves": 60, "subsample": 0.78, "colsample_bytree": 0.9,
+        "min_child_samples": 49, "reg_alpha": 1.01, "reg_lambda": 0.26,
+        "random_state": 42, "n_jobs": -1, "verbose": -1,
+    }
+]
 
 daytona = Daytona()
 
