@@ -72,86 +72,93 @@ with open('/tmp/config.json', 'w') as f:
         sb.delete()
 
 
-def run_parallel(configs, stage, batch=None):
-    results = []
-    with ThreadPoolExecutor(max_workers=len(configs)) as ex:
+def stream_stage(configs: list, stage: int):
+    """Generator: yields one result dict per sandbox as it completes.
+    No MLflow logging — used by dashboard for real-time UI updates."""
+    with ThreadPoolExecutor(max_workers=max(1, len(configs))) as ex:
         futures = {ex.submit(run_sandbox, cfg, stage): cfg for cfg in configs}
         for f in as_completed(futures):
             try:
-                r = f.result()
-                results.append(r)
-                print(f"    stage={stage} val_mae={r['val_mae']:.4f}")
-                log_trial(r["params"], r["val_mae"], r["test_mae"], stage, batch)
+                yield f.result()
             except Exception as e:
-                print(f"    [SKIP] {e}")
+                print(f"    [SKIP] {e}", flush=True)
+
+
+def run_parallel(configs, stage, batch=None):
+    """CLI wrapper: calls stream_stage and logs each result to MLflow."""
+    results = []
+    for r in stream_stage(configs, stage):
+        results.append(r)
+        print(f"    stage={stage} val_mae={r['val_mae']:.4f}")
+        log_trial(r["params"], r["val_mae"], r["test_mae"], stage, batch)
     return results
 
 
-# ── MLflow setup ──────────────────────────────────────────────
-start_experiment("electricity-hyperband")
+def run_hyperband():
+    start_experiment("electricity-hyperband")
 
-with mlflow.start_run(run_name="hyperband_search"):
-    mlflow.log_param("n_batches", N_BATCHES)
-    mlflow.log_param("n_batch",   N_BATCH)
-    mlflow.log_param("top_s2",    TOP_S2)
-    mlflow.log_param("top_s3",    TOP_S3)
-    mlflow.log_param("baseline",  BASELINE)
+    with mlflow.start_run(run_name="hyperband_search"):
+        mlflow.log_param("n_batches", N_BATCHES)
+        mlflow.log_param("n_batch",   N_BATCH)
+        mlflow.log_param("top_s2",    TOP_S2)
+        mlflow.log_param("top_s3",    TOP_S3)
+        mlflow.log_param("baseline",  BASELINE)
 
-    # ── Stage 1: N_BATCHES × N_BATCH sandboxes × 10% data ────
-    t_start = time.time()
-    n_total = N_BATCH * N_BATCHES
-    print(f"Stage 1: {N_BATCHES} batches × {N_BATCH} sandboxes × 10% data  ({n_total} configs total)")
-    all_s1 = []
-    for b in range(N_BATCHES):
-        print(f"  Batch {b + 1}/{N_BATCHES}:")
-        configs = [sample_params() for _ in range(N_BATCH)]
-        all_s1.extend(run_parallel(configs, stage=1, batch=b + 1))
+        # ── Stage 1 ───────────────────────────────────────────
+        t_start = time.time()
+        n_total = N_BATCH * N_BATCHES
+        print(f"Stage 1: {N_BATCHES} batches × {N_BATCH} sandboxes × 10% data  ({n_total} configs total)")
+        all_s1 = []
+        for b in range(N_BATCHES):
+            print(f"  Batch {b + 1}/{N_BATCHES}:")
+            configs = [sample_params() for _ in range(N_BATCH)]
+            all_s1.extend(run_parallel(configs, stage=1, batch=b + 1))
 
-    if not all_s1:
-        raise RuntimeError("All Stage 1 sandboxes failed.")
-    all_s1.sort(key=lambda x: x["val_mae"])
-    survivors_s2 = all_s1[:TOP_S2]
+        if not all_s1:
+            raise RuntimeError("All Stage 1 sandboxes failed.")
+        all_s1.sort(key=lambda x: x["val_mae"])
+        survivors_s2 = all_s1[:TOP_S2]
+        for seed in SEED_PARAMS:
+            survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
+        print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
 
-    for seed in SEED_PARAMS:
-        survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
-    print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
+        # ── Stage 2 ───────────────────────────────────────────
+        print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
+        s2_results = run_parallel([r["params"] for r in survivors_s2], stage=2)
+        if not s2_results:
+            raise RuntimeError("All Stage 2 sandboxes failed.")
+        s2_results.sort(key=lambda x: x["val_mae"])
+        survivors_s3 = s2_results[:TOP_S3]
+        print(f"\nStage 2 → Top {TOP_S3} val_MAE: {[round(r['val_mae'], 4) for r in survivors_s3]}")
 
-    # ── Stage 2: survivors × 33% data ────────────────────────
-    print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
-    s2_results = run_parallel([r["params"] for r in survivors_s2], stage=2)
+        # ── Stage 3 ───────────────────────────────────────────
+        print(f"\nStage 3: {len(survivors_s3)} sandboxes × 100% data")
+        s3_results = run_parallel([r["params"] for r in survivors_s3], stage=3)
+        if not s3_results:
+            raise RuntimeError("All Stage 3 sandboxes failed.")
+        best = min(s3_results, key=lambda x: x["test_mae"])
 
-    if not s2_results:
-        raise RuntimeError("All Stage 2 sandboxes failed.")
-    s2_results.sort(key=lambda x: x["val_mae"])
-    survivors_s3 = s2_results[:TOP_S3]
-    print(f"\nStage 2 → Top {TOP_S3} val_MAE: {[round(r['val_mae'], 4) for r in survivors_s3]}")
+        elapsed = time.time() - t_start
+        mins, secs = divmod(int(elapsed), 60)
 
-    # ── Stage 3: top survivors × 100% data ───────────────────
-    print(f"\nStage 3: {len(survivors_s3)} sandboxes × 100% data")
-    s3_results = run_parallel([r["params"] for r in survivors_s3], stage=3)
+        log_hyperband_summary(
+            best_params=best["params"],
+            best_test_mae=best["test_mae"],
+            baseline=BASELINE,
+            n_total=n_total,
+            elapsed_sec=int(elapsed),
+        )
 
-    if not s3_results:
-        raise RuntimeError("All Stage 3 sandboxes failed.")
-    best = min(s3_results, key=lambda x: x["test_mae"])
+    print(f"\n{'='*50}")
+    print(f"Total wall-clock time                    : {mins}m {secs}s")
+    print(f"Total configs explored                   : {n_total}")
+    print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
+    print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
+    print(f"Delta                                    : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
+    print(f"\nBest params (seed for next run):")
+    print(json.dumps(best["params"], indent=2))
+    print(f"\nMLflow UI: run `mlflow ui --port 5001` then open http://localhost:5001")
 
-    elapsed = time.time() - t_start
-    mins, secs = divmod(int(elapsed), 60)
 
-    # ── Log summary to MLflow ─────────────────────────────────
-    log_hyperband_summary(
-        best_params=best["params"],
-        best_test_mae=best["test_mae"],
-        baseline=BASELINE,
-        n_total=n_total,
-        elapsed_sec=int(elapsed),
-    )
-
-print(f"\n{'='*50}")
-print(f"Total wall-clock time                    : {mins}m {secs}s")
-print(f"Total configs explored                   : {n_total}")
-print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
-print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
-print(f"Delta                                    : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
-print(f"\nBest params (seed for next run):")
-print(json.dumps(best["params"], indent=2))
-print(f"\nMLflow UI: run `mlflow ui` then open http://localhost:5000")
+if __name__ == "__main__":
+    run_hyperband()
