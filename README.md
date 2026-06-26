@@ -16,9 +16,9 @@ That project established the ENTSO-E data pipeline, LightGBM feature engineering
 
 ## Overview
 
-This project implements a **3-stage Hyperband hyperparameter search** for LightGBM electricity price forecasting, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes, with **MLflow** for full experiment tracking and observability.
+This project implements a **3-stage Hyperband hyperparameter search** across multiple model types, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes, with **MLflow** for full experiment tracking and a **Streamlit dashboard** for real-time visualization.
 
-Instead of evaluating hyperparameter configurations one by one (like Optuna), we spin up multiple sandboxes simultaneously — each training a different configuration — and progressively eliminate the worst performers across three stages.
+The Hyperband is designed as a **generic HPO framework** — the model is a plugin. Switching from LightGBM to XGBoost, CatBoost, or Random Forest requires changing one line. The orchestration logic stays identical.
 
 ---
 
@@ -38,7 +38,8 @@ Instead of evaluating hyperparameter configurations one by one (like Optuna), we
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   orchestrator.py                   │
-│              (runs on local machine)                │
+│         MODEL_TYPE = "lightgbm" | "xgboost"        │
+│               "catboost" | "rf"                     │
 │                                                     │
 │  ThreadPoolExecutor → 9 Daytona sandboxes at once  │
 │                       ↓                            │
@@ -50,6 +51,7 @@ Instead of evaluating hyperparameter configurations one by one (like Optuna), we
    [Sandbox 1]   [Sandbox 2]  ... [Sandbox 9]
    git clone      git clone        git clone
    sandbox_train  sandbox_train    sandbox_train
+   --model lgb    --model lgb      --model lgb
    → result.json  → result.json   → result.json
 ```
 
@@ -73,6 +75,25 @@ Each stage uses progressively more data. Configs that perform poorly are elimina
 
 ---
 
+## Supported Models
+
+| Model | Key Parameters | Notes |
+|---|---|---|
+| **LightGBM** | `num_leaves`, `learning_rate`, `n_estimators`, regularization | Default; best result on this dataset |
+| **XGBoost** | `max_depth`, `learning_rate`, `gamma`, `min_child_weight` | Early stopping via `fit()` |
+| **CatBoost** | `depth`, `iterations`, `l2_leaf_reg`, `rsm` | Bootstrap type set to Bernoulli |
+| **Random Forest** | `max_depth`, `min_samples_split`, `max_features` | No early stopping; stage size controls compute |
+
+Switch model with one line in `orchestrator.py`:
+
+```python
+MODEL_TYPE = "xgboost"   # "lightgbm" | "xgboost" | "catboost" | "rf"
+```
+
+Or select from the dropdown in the Streamlit dashboard — **no code changes needed**.
+
+---
+
 ## Dataset
 
 - **Source**: ENTSO-E European day-ahead electricity prices
@@ -85,35 +106,22 @@ Each stage uses progressively more data. Configs that perform poorly are elimina
 
 ---
 
-## Hyperparameter Search Space
-
-| Parameter | Range |
-|---|---|
-| `n_estimators` | 1000, 1500, 2000, 3000, 5000 |
-| `max_depth` | 3–6 |
-| `learning_rate` | 0.003, 0.005, 0.01, 0.02, 0.03 |
-| `num_leaves` | 15–63 |
-| `subsample` | 0.6–0.9 |
-| `colsample_bytree` | 0.6–0.9 |
-| `min_child_samples` | 20–100 |
-| `reg_alpha` | 0.0–2.0 |
-| `reg_lambda` | 0.1–2.0 |
-
----
-
 ## Project Structure
 
 ```
 electricity-hyperband/
-├── orchestrator.py           # Main Hyperband loop — controls all sandboxes
-├── orchestrator_lstm.py      # LSTM variant of Hyperband
-├── sandbox_train.py          # LightGBM training script (runs inside sandbox)
-├── sandbox_train_lstm.py     # LSTM training script (runs inside sandbox)
-├── setup_snapshot.py         # One-time setup: LightGBM Daytona snapshot
-├── setup_snapshot_lstm.py    # One-time setup: LSTM Daytona snapshot
+├── orchestrator.py           # Hyperband loop + model selector + MLflow
+├── orchestrator_lstm.py      # LSTM variant
+├── sandbox_train.py          # Generic training script (LGB/XGB/CatBoost/RF)
+├── sandbox_train_lstm.py     # LSTM training script
+├── setup_snapshot_v3.py      # One-time setup: snapshot with all 4 model packages
+├── setup_snapshot_lstm.py    # One-time setup: LSTM snapshot
 ├── tracking/
 │   ├── __init__.py
-│   └── mlflow_logger.py      # MLflow experiment tracking helpers
+│   └── mlflow_logger.py      # MLflow helpers
+├── dashboard/
+│   ├── __init__.py
+│   └── app.py                # Streamlit real-time dashboard
 └── data/
     └── features_2020_2024.parquet
 ```
@@ -125,40 +133,42 @@ electricity-hyperband/
 ### 1. Setup (run once)
 
 ```bash
-python setup_snapshot.py
+python setup_snapshot_v3.py
 ```
 
-Creates a Daytona snapshot (`elec-forecast-v2`) with all Python packages pre-installed (`lightgbm`, `pandas`, `scikit-learn`, `pyarrow`, `numpy`). All subsequent sandboxes boot from this snapshot instantly.
+Creates a Daytona snapshot (`elec-forecast-v3`) with all four model packages pre-installed:
+`lightgbm 4.6.0` · `xgboost 3.3.0` · `catboost 1.2.10` · `scikit-learn 1.8.0`
 
-### 2. Run the Hyperband search
+All subsequent sandboxes boot from this snapshot — no per-sandbox install overhead.
+
+### 2. Run the Hyperband search (CLI)
 
 ```bash
 python orchestrator.py
 ```
 
 The orchestrator:
-1. Starts an MLflow parent run (`hyperband_search`)
-2. Spawns 9 sandboxes in parallel for each Stage 1 batch
-3. Each sandbox clones the repo, writes its config, and runs `sandbox_train.py`
-4. Results are collected, logged to MLflow, sorted by `val_mae`, and worst configs are eliminated
-5. Survivors advance to the next stage with more training data
+1. Reads `MODEL_TYPE` to select the active model and its param sampler
+2. Starts an MLflow parent run (`hyperband_search`)
+3. Spawns 9 sandboxes in parallel for each Stage 1 batch
+4. Each sandbox runs `sandbox_train.py --model {MODEL_TYPE}`
+5. Results are collected, logged to MLflow, and worst configs are eliminated
+6. Survivors advance to the next stage with more training data
 
-### 3. View experiment results in MLflow
-
-```bash
-mlflow ui --port 5001
-# Open http://localhost:5001
-```
-
-Each Hyperband run creates:
-- A **parent run** with search configuration and final best metrics
-- **Nested trial runs** for every sandbox, each with full hyperparameters and stage-level MAE
-
-### 4. Real-time Dashboard
+### 3. Run via Dashboard (recommended for demos)
 
 ```bash
 streamlit run dashboard/app.py
 # Open http://localhost:8501
+```
+
+Select model from dropdown, click **▶ Start** — leaderboard updates live as each sandbox completes.
+
+### 4. View experiment results in MLflow
+
+```bash
+mlflow ui --port 5001
+# Open http://localhost:5001
 ```
 
 ---
@@ -166,7 +176,7 @@ streamlit run dashboard/app.py
 ## Requirements
 
 ```bash
-pip install daytona lightgbm pandas scikit-learn pyarrow numpy mlflow
+pip install daytona lightgbm xgboost catboost scikit-learn pandas pyarrow numpy mlflow streamlit
 ```
 
 Set your Daytona API key:
@@ -177,22 +187,9 @@ export DAYTONA_API_KEY="your-api-key"
 
 ---
 
-## Daytona Features Used
-
-| Feature | Usage |
-|---|---|
-| **Sandbox from Snapshot** | Pre-installed packages, instant startup — setup cost paid once |
-| **Parallel sandboxes** | Up to 9 simultaneous training jobs per batch |
-| **`process.code_run()`** | Write config safely without shell escaping issues |
-| **`process.exec()`** | Run training script and collect results |
-| **Auto cleanup** | `sb.delete()` in `finally` block — no idle costs |
-| **Fault isolation** | One sandbox crash does not affect others — `[SKIP]` pattern |
-
----
-
 ## Real-time Dashboard
 
-Click **▶ Start** to launch the search. The leaderboard updates live as each sandbox completes.
+Select model, click **▶ Start**. The leaderboard updates live as each sandbox completes.
 
 | Start | Running | Complete |
 |:---:|:---:|:---:|
@@ -235,6 +232,7 @@ Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) f
 
 ```json
 {
+  "model": "lightgbm",
   "n_estimators": 5000,
   "max_depth": 5,
   "learning_rate": 0.02,
@@ -256,7 +254,7 @@ Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) f
 
 - [x] 3-stage Hyperband with Daytona parallel sandboxes
 - [x] MLflow experiment tracking
-- [ ] Real-time dashboard (Streamlit)
-- [ ] Generic model interface (LightGBM / XGBoost / CatBoost / Random Forest)
+- [x] Real-time Streamlit dashboard
+- [x] Generic model interface (LightGBM / XGBoost / CatBoost / Random Forest)
 - [ ] LLM-powered ML agent (diagnose → suggest → re-run)
 - [ ] Full forecasting platform (upload CSV → auto HPO → deploy API → monitor drift)
