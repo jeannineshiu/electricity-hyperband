@@ -13,9 +13,9 @@ BASELINE  = 7.23
 # Known good configs from previous runs — always included in Stage 2
 SEED_PARAMS = [
     {
-        "n_estimators": 2000, "max_depth": 5, "learning_rate": 0.02,
-        "num_leaves": 60, "subsample": 0.78, "colsample_bytree": 0.9,
-        "min_child_samples": 49, "reg_alpha": 1.01, "reg_lambda": 0.26,
+        "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
+        "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
+        "min_child_samples": 36, "reg_alpha": 1.26, "reg_lambda": 1.96,
         "random_state": 42, "n_jobs": -1, "verbose": -1,
     }
 ]
