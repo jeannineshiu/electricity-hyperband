@@ -10,6 +10,10 @@ TOP_S2    = 6   # top configs advancing to Stage 2
 TOP_S3    = 3   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
+# Known good configs from previous runs — always included in Stage 2
+# Paste best params output here after each successful run
+SEED_PARAMS = []
+
 daytona = Daytona()
 
 def sample_params():
@@ -79,7 +83,11 @@ if not all_s1:
     raise RuntimeError("All Stage 1 sandboxes failed.")
 all_s1.sort(key=lambda x: x["val_mae"])
 survivors_s2 = all_s1[:TOP_S2]
-print(f"\nStage 1 → Top {TOP_S2} val_MAE: {[round(r['val_mae'], 4) for r in survivors_s2]}")
+
+# Inject known-good seed params directly into Stage 2
+for seed in SEED_PARAMS:
+    survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
+print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
 
 # ── Stage 2: Top 6 × 33% data ─────────────────────────────────
 print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
@@ -104,3 +112,6 @@ print(f"Total configs explored                   : {n_total}")
 print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
 print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
 print(f"Delta                                    : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
+print(f"\nBest params (seed for next run):")
+import json as _json
+print(_json.dumps(best["params"], indent=2))
