@@ -4,8 +4,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import orchestrator as orch
 from orchestrator import (
-    stream_stage, sample_params, SEED_PARAMS,
+    stream_stage, get_seed_params,
     N_BATCH, N_BATCHES, TOP_S2, TOP_S3, BASELINE,
 )
 
@@ -23,6 +24,19 @@ c1, c2, c3 = st.columns(3)
 c1.metric("Stage 1", f"{N_BATCH * N_BATCHES} configs", f"{N_BATCH} sandboxes / batch · 10% data")
 c2.metric("Stage 2", f"Top {TOP_S2} + seeds", "33% data")
 c3.metric("Stage 3", f"Top {TOP_S3}", "100% data · full training")
+
+# ── Model selector ─────────────────────────────────────────────
+model_choice = st.selectbox(
+    "Model",
+    options=["lightgbm", "xgboost", "catboost", "rf"],
+    format_func=lambda x: {
+        "lightgbm": "LightGBM",
+        "xgboost":  "XGBoost",
+        "catboost": "CatBoost",
+        "rf":       "Random Forest",
+    }[x],
+)
+orch.MODEL_TYPE = model_choice  # update module-level variable
 
 st.divider()
 
@@ -74,7 +88,7 @@ all_s1 = []
 completed = 0
 
 for b in range(N_BATCHES):
-    configs = [sample_params() for _ in range(N_BATCH)]
+    configs = [orch.sample_params() for _ in range(N_BATCH)]
     for r in stream_stage(configs, stage=1):
         all_s1.append(r)
         all_rows.append({**r, "stage": 1, "batch": b + 1})
@@ -87,7 +101,7 @@ if not all_s1:
 
 all_s1.sort(key=lambda x: x["val_mae"])
 survivors_s2 = all_s1[:TOP_S2]
-for seed in SEED_PARAMS:
+for seed in get_seed_params():
     survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
 
 # ── Stage 2 ────────────────────────────────────────────────────

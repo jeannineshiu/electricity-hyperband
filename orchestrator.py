@@ -4,33 +4,17 @@ from daytona import Daytona, CreateSandboxFromSnapshotParams
 import mlflow
 from tracking.mlflow_logger import start_experiment, log_trial, log_hyperband_summary
 
-SNAPSHOT  = "elec-forecast-v2"
-REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
-N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
-N_BATCHES = 4   # Stage 1 batches → 36 configs total
-TOP_S2    = 5   # top configs advancing to Stage 2
-TOP_S3    = 5   # top configs advancing to Stage 3
-BASELINE  = 7.23
+SNAPSHOT   = "elec-forecast-v3"
+REPO_URL   = "https://github.com/jeannineshiu/electricity-hyperband"
+MODEL_TYPE = "lightgbm"   # switch to "xgboost", "catboost", or "rf"
+N_BATCH    = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
+N_BATCHES  = 4   # Stage 1 batches → 36 configs total
+TOP_S2     = 5   # top configs advancing to Stage 2
+TOP_S3     = 5   # top configs advancing to Stage 3
+BASELINE   = 7.23
 
-# Known good configs from previous runs — always included in Stage 2
-_BEST = {
-    "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
-    "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
-    "min_child_samples": 36, "reg_alpha": 1.26, "reg_lambda": 1.96,
-    "n_jobs": -1, "verbose": -1,
-}
-SEED_PARAMS = [
-    {**_BEST, "random_state": 42},
-    {**_BEST, "random_state": 123},
-    {**_BEST, "random_state": 456},
-    {**_BEST, "random_state": 789},
-    {**_BEST, "learning_rate": 0.01, "random_state": 42},
-]
-
-daytona = Daytona()
-
-
-def sample_params():
+# ── Model-specific param samplers ─────────────────────────────
+def _sample_lightgbm():
     return {
         "n_estimators":      random.choice([1000, 1500, 2000, 3000, 5000]),
         "max_depth":         random.randint(3, 6),
@@ -41,8 +25,75 @@ def sample_params():
         "min_child_samples": random.randint(20, 100),
         "reg_alpha":         round(random.uniform(0.0, 2.0), 2),
         "reg_lambda":        round(random.uniform(0.1, 2.0), 2),
-        "random_state":      42, "n_jobs": -1, "verbose": -1,
+        "random_state": 42, "n_jobs": -1, "verbose": -1,
     }
+
+def _sample_xgboost():
+    return {
+        "n_estimators":     random.choice([200, 400, 600, 800, 1000]),
+        "max_depth":        random.randint(3, 8),
+        "learning_rate":    random.choice([0.01, 0.05, 0.1, 0.2]),
+        "subsample":        round(random.uniform(0.6, 1.0), 2),
+        "colsample_bytree": round(random.uniform(0.6, 1.0), 2),
+        "min_child_weight": random.randint(1, 10),
+        "reg_alpha":        round(random.uniform(0.0, 1.0), 2),
+        "reg_lambda":       round(random.uniform(0.1, 2.0), 2),
+        "gamma":            round(random.uniform(0.0, 0.5), 2),
+        "random_state": 42, "n_jobs": -1, "verbosity": 0,
+    }
+
+def _sample_catboost():
+    return {
+        "iterations":     random.choice([200, 400, 600, 800]),
+        "depth":          random.randint(4, 10),
+        "learning_rate":  random.choice([0.01, 0.05, 0.1, 0.2]),
+        "l2_leaf_reg":    round(random.uniform(1.0, 10.0), 1),
+        "bootstrap_type": "Bernoulli",          # required for subsample to work
+        "subsample":      round(random.uniform(0.6, 1.0), 2),
+        "rsm":            round(random.uniform(0.6, 1.0), 2),
+        "random_seed": 42,
+    }
+
+def _sample_rf():
+    return {
+        "n_estimators":      random.choice([100, 200, 300, 500]),
+        "max_depth":         random.choice([5, 10, 15, 20, None]),
+        "min_samples_split": random.randint(2, 20),
+        "min_samples_leaf":  random.randint(1, 10),
+        "max_features":      random.choice(["sqrt", "log2", 0.5, 0.7]),
+        "random_state": 42, "n_jobs": -1,
+    }
+
+_PARAM_SAMPLERS = {
+    "lightgbm": _sample_lightgbm,
+    "xgboost":  _sample_xgboost,
+    "catboost": _sample_catboost,
+    "rf":       _sample_rf,
+}
+
+def sample_params():
+    return _PARAM_SAMPLERS[MODEL_TYPE]()
+
+# Known good LightGBM seeds — evaluated at call time so MODEL_TYPE switching works
+_BEST_LGB = {
+    "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
+    "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
+    "min_child_samples": 36, "reg_alpha": 1.26, "reg_lambda": 1.96,
+    "n_jobs": -1, "verbose": -1,
+}
+_LGB_SEEDS = [
+    {**_BEST_LGB, "random_state": 42},
+    {**_BEST_LGB, "random_state": 123},
+    {**_BEST_LGB, "random_state": 456},
+    {**_BEST_LGB, "random_state": 789},
+    {**_BEST_LGB, "learning_rate": 0.01, "random_state": 42},
+]
+
+def get_seed_params() -> list:
+    """Returns known-good seeds for the current MODEL_TYPE (LightGBM only)."""
+    return _LGB_SEEDS if MODEL_TYPE == "lightgbm" else []
+
+daytona = Daytona()
 
 
 def run_sandbox(params, stage):
@@ -60,7 +111,7 @@ with open('/tmp/config.json', 'w') as f:
 """)
         train_resp = sb.process.exec(
             f"python $HOME/project/sandbox_train.py "
-            f"--config /tmp/config.json --stage {stage}"
+            f"--config /tmp/config.json --stage {stage} --model {MODEL_TYPE}"
         )
         if train_resp.exit_code != 0:
             raise RuntimeError(f"Training failed (exit {train_resp.exit_code}): {train_resp.result}")
@@ -118,9 +169,10 @@ def run_hyperband():
             raise RuntimeError("All Stage 1 sandboxes failed.")
         all_s1.sort(key=lambda x: x["val_mae"])
         survivors_s2 = all_s1[:TOP_S2]
-        for seed in SEED_PARAMS:
+        seeds = get_seed_params()
+        for seed in seeds:
             survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
-        print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
+        print(f"\nStage 1 → Top {TOP_S2} + {len(seeds)} seeds → Stage 2 ({len(survivors_s2)} total)")
 
         # ── Stage 2 ───────────────────────────────────────────
         print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
