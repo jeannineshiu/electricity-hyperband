@@ -154,6 +154,13 @@ Each Hyperband run creates:
 - A **parent run** with search configuration and final best metrics
 - **Nested trial runs** for every sandbox, each with full hyperparameters and stage-level MAE
 
+### 4. Real-time Dashboard
+
+```bash
+streamlit run dashboard/app.py
+# Open http://localhost:8501
+```
+
 ---
 
 ## Requirements
@@ -183,6 +190,16 @@ export DAYTONA_API_KEY="your-api-key"
 
 ---
 
+## Real-time Dashboard
+
+Click **▶ Start** to launch the search. The leaderboard updates live as each sandbox completes.
+
+| Start | Running | Complete |
+|:---:|:---:|:---:|
+| ![Dashboard start](docs/screenshots/dashboard_01.png) | ![Dashboard running](docs/screenshots/dashboard_02.png) | ![Dashboard complete](docs/screenshots/dashboard_03.png) |
+
+---
+
 ## MLflow Tracking
 
 Every Hyperband run is fully logged to MLflow:
@@ -196,6 +213,8 @@ Every Hyperband run is fully logged to MLflow:
 | Best params, best MAE, improvement, wall-clock time | Parent run — metrics |
 
 Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) for easy navigation in the UI.
+
+![MLflow UI](docs/screenshots/mlflow_ui.png)
 
 ---
 
