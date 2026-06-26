@@ -5,9 +5,9 @@ from daytona import Daytona, CreateSandboxFromSnapshotParams
 SNAPSHOT  = "elec-forecast-v2"
 REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
 N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
-N_BATCHES = 3   # Stage 1 batches → 27 configs total
+N_BATCHES = 4   # Stage 1 batches → 36 configs total
 TOP_S2    = 6   # top configs advancing to Stage 2
-TOP_S3    = 2   # top configs advancing to Stage 3
+TOP_S3    = 3   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
 daytona = Daytona()
@@ -101,5 +101,5 @@ best = min(s3_results, key=lambda x: x["test_mae"])
 print(f"\n{'='*50}")
 print(f"Total configs explored                   : {n_total}")
 print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
-print(f"Hyperband 3-stage (2×9→6→2)             : {best['test_mae']:.4f}")
+print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
 print(f"Delta                                    : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
