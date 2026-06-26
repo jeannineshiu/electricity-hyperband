@@ -1,0 +1,204 @@
+[
+  {
+    "timestamp": "2026-06-26T22:39:34.044338",
+    "model_type": "lightgbm",
+    "n_trials": 9,
+    "reasoning": "Val MAE 6.0 vs Test MAE 7.5 = 1.5 EUR/MWh gap driven by the 2023\u21922024 distribution shift, not classic train/val overfitting. Strategy: push toward conservative, high-regularization, low-capacity configs that generalize across the regime change rather than memorizing 2023. Increasing reg_alpha/reg_lambda heavily, capping num_leaves and max_depth, raising min_child_samples, and adding feature/bagging subsampling to reduce variance. Lower learning rate with more estimators for smoother, more robust fits.",
+    "search_space": {
+      "num_leaves": {
+        "type": "choice",
+        "values": [
+          15,
+          23,
+          31,
+          47
+        ]
+      },
+      "max_depth": {
+        "type": "choice",
+        "values": [
+          4,
+          5,
+          6,
+          8
+        ]
+      },
+      "min_child_samples": {
+        "type": "choice",
+        "values": [
+          50,
+          100,
+          200,
+          400
+        ]
+      },
+      "learning_rate": {
+        "type": "choice",
+        "values": [
+          0.01,
+          0.02,
+          0.05
+        ]
+      },
+      "n_estimators": {
+        "type": "choice",
+        "values": [
+          600,
+          1000,
+          1500
+        ]
+      },
+      "reg_alpha": {
+        "type": "range",
+        "min": 1.0,
+        "max": 10.0
+      },
+      "reg_lambda": {
+        "type": "range",
+        "min": 1.0,
+        "max": 15.0
+      },
+      "feature_fraction": {
+        "type": "choice",
+        "values": [
+          0.6,
+          0.7,
+          0.8
+        ]
+      },
+      "bagging_fraction": {
+        "type": "choice",
+        "values": [
+          0.6,
+          0.7,
+          0.8
+        ]
+      },
+      "bagging_freq": {
+        "type": "choice",
+        "values": [
+          1,
+          5
+        ]
+      }
+    },
+    "best_test_mae": 8.01808667906252,
+    "best_val_mae": 6.8682683259914405,
+    "best_params": {
+      "random_state": 42,
+      "n_jobs": -1,
+      "verbose": -1,
+      "num_leaves": 47,
+      "max_depth": 6,
+      "min_child_samples": 50,
+      "learning_rate": 0.01,
+      "n_estimators": 1000,
+      "reg_alpha": 9.9584,
+      "reg_lambda": 14.8497,
+      "feature_fraction": 0.8,
+      "bagging_fraction": 0.8,
+      "bagging_freq": 5
+    }
+  },
+  {
+    "timestamp": "2026-06-26T22:40:18.228419",
+    "model_type": "lightgbm",
+    "n_trials": 9,
+    "reasoning": "Previous run over-corrected into underfitting: heavy reg + low capacity closed the val/test gap (1.5\u21921.15) but pushed both MAEs up (test 7.5\u21928.02). The winner hit every high-capacity / low-min_child corner, signaling the search wanted more capacity. Rebalancing toward the moderate zone: loosen num_leaves/max_depth back up, lower min_child_samples floor, and pull reg_alpha/reg_lambda into a MID range (not the extreme 10-15 that caused underfit). Retain feature/bagging subsampling as cheap variance reduction. Goal: keep the gap-narrowing benefit of regularization while restoring enough capacity to beat the 7.18 best.",
+    "search_space": {
+      "num_leaves": {
+        "type": "choice",
+        "values": [
+          31,
+          47,
+          63,
+          95
+        ]
+      },
+      "max_depth": {
+        "type": "choice",
+        "values": [
+          6,
+          8,
+          10,
+          12
+        ]
+      },
+      "min_child_samples": {
+        "type": "choice",
+        "values": [
+          20,
+          40,
+          60,
+          100
+        ]
+      },
+      "learning_rate": {
+        "type": "choice",
+        "values": [
+          0.02,
+          0.03,
+          0.05
+        ]
+      },
+      "n_estimators": {
+        "type": "choice",
+        "values": [
+          800,
+          1200,
+          2000
+        ]
+      },
+      "reg_alpha": {
+        "type": "range",
+        "min": 0.5,
+        "max": 4.0
+      },
+      "reg_lambda": {
+        "type": "range",
+        "min": 0.5,
+        "max": 5.0
+      },
+      "feature_fraction": {
+        "type": "choice",
+        "values": [
+          0.7,
+          0.8,
+          0.9
+        ]
+      },
+      "bagging_fraction": {
+        "type": "choice",
+        "values": [
+          0.7,
+          0.8,
+          0.9
+        ]
+      },
+      "bagging_freq": {
+        "type": "choice",
+        "values": [
+          1,
+          5
+        ]
+      }
+    },
+    "best_test_mae": 7.349336218923619,
+    "best_val_mae": 6.227067227695449,
+    "best_params": {
+      "random_state": 42,
+      "n_jobs": -1,
+      "verbose": -1,
+      "num_leaves": 63,
+      "max_depth": 6,
+      "min_child_samples": 40,
+      "learning_rate": 0.05,
+      "n_estimators": 1200,
+      "reg_alpha": 1.6977,
+      "reg_lambda": 3.6693,
+      "feature_fraction": 0.9,
+      "bagging_fraction": 0.9,
+      "bagging_freq": 5
+    }
+  }
+]

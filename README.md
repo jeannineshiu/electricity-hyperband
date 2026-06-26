@@ -16,7 +16,7 @@ That project established the ENTSO-E data pipeline, LightGBM feature engineering
 
 ## Overview
 
-This project implements a **3-stage Hyperband hyperparameter search** across multiple model types, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes, with **MLflow** for full experiment tracking and a **Streamlit dashboard** for real-time visualization.
+This project implements a **3-stage Hyperband hyperparameter search** across multiple model types, using [Daytona](https://daytona.io) to run training jobs in massively parallel sandboxes — with **MLflow** for experiment tracking, a **Streamlit dashboard** for real-time visualization, and a **Claude-powered LLM agent** that diagnoses problems and launches targeted searches autonomously.
 
 The Hyperband is designed as a **generic HPO framework** — the model is a plugin. Switching from LightGBM to XGBoost, CatBoost, or Random Forest requires changing one line. The orchestration logic stays identical.
 
@@ -122,6 +122,11 @@ electricity-hyperband/
 ├── dashboard/
 │   ├── __init__.py
 │   └── app.py                # Streamlit real-time dashboard
+├── agent/
+│   ├── __init__.py
+│   ├── history.py            # Run history load/save (shared by CLI + agent)
+│   ├── ml_engineer.py        # LLM agent — Claude API + tool use
+│   └── run_history.json      # Persistent experiment memory (auto-generated)
 └── data/
     └── features_2020_2024.parquet
 ```
@@ -171,18 +176,31 @@ mlflow ui --port 5001
 # Open http://localhost:5001
 ```
 
+### 5. Ask the LLM Agent
+
+```bash
+python agent/ml_engineer.py "My val MAE is 6.0 but test MAE is 7.5 — overfitting to 2023. What should I try?"
+```
+
+The agent will:
+1. Read experiment history to understand what's been tried
+2. Diagnose the problem and propose a targeted search space
+3. Launch Daytona sandboxes autonomously to run the search
+4. Return a structured report with findings and next steps
+
 ---
 
 ## Requirements
 
 ```bash
-pip install daytona lightgbm xgboost catboost scikit-learn pandas pyarrow numpy mlflow streamlit
+pip install daytona lightgbm xgboost catboost scikit-learn pandas pyarrow numpy mlflow streamlit anthropic
 ```
 
-Set your Daytona API key:
+Set your API keys:
 
 ```bash
-export DAYTONA_API_KEY="your-api-key"
+export DAYTONA_API_KEY="your-daytona-api-key"
+export ANTHROPIC_API_KEY="your-anthropic-api-key"   # required for LLM agent
 ```
 
 ---
@@ -214,6 +232,38 @@ Every Hyperband run is fully logged to MLflow:
 Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) for easy navigation in the UI.
 
 ![MLflow UI](docs/screenshots/mlflow_ui.png)
+
+---
+
+## LLM ML Engineer Agent
+
+The agent uses **Claude claude-opus-4-8 + Tool Use** to act as an autonomous ML engineer: it reads experiment history, diagnoses the problem, proposes a refined search space, and launches Daytona sandboxes — all from a single natural-language prompt.
+
+```
+User: "My val MAE is 6.0 but test MAE is 7.5 — clear overfitting to 2023."
+  ↓
+Agent calls: read_experiment_history
+  ↓
+Agent calls: launch_hyperband(model="lightgbm", search_space={...}, reasoning="...")
+  ↓
+Daytona runs 9 parallel sandboxes → top 3 → best 1 (full training)
+  ↓
+Agent: "Found test_mae 7.35 — gap narrowed from 1.5 to 1.12.
+        Recommend fine-grained search around num_leaves∈[55,71], reg_lambda∈[2.5,4.5]"
+```
+
+### Tools available to the agent
+
+| Tool | Description |
+|---|---|
+| `read_experiment_history` | Reads `agent/run_history.json` — all past runs, params, and MAEs |
+| `launch_hyperband` | Launches a mini 3-stage Hyperband (n→3→1) on Daytona with a refined search space |
+
+### Safety
+
+- **Param bounds validation**: the agent cannot propose values outside safe ranges (e.g. `learning_rate > 0.5`, `num_leaves > 300`)
+- **Sandbox limit enforcement**: `n_trials` clamped to ≤ 9 (Daytona concurrency limit)
+- **Persistent memory**: every run is saved to `agent/run_history.json`, so the agent learns across sessions
 
 ---
 
@@ -258,5 +308,5 @@ Run names follow `s{stage}_b{batch}_trial_{n}` format (e.g. `s1_b2_trial_015`) f
 - [x] MLflow experiment tracking
 - [x] Real-time Streamlit dashboard
 - [x] Generic model interface (LightGBM / XGBoost / CatBoost / Random Forest)
-- [ ] LLM-powered ML agent (diagnose → suggest → re-run)
+- [x] LLM-powered ML agent (Claude claude-opus-4-8 — diagnose → suggest → launch → report)
 - [ ] Full forecasting platform (upload CSV → auto HPO → deploy API → monitor drift)
