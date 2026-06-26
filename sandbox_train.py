@@ -26,9 +26,13 @@ train_df = df[df["timestamp"] <= TRAIN_END]
 val_df   = df[(df["timestamp"] > TRAIN_END) & (df["timestamp"] <= VAL_END)]
 test_df  = df[df["timestamp"] > VAL_END]
 
-# Stage 1: use only the most recent 15% of training data for fast screening
+# Stage 1: 10% data for fast screening
+# Stage 2: 33% data for medium evaluation
+# Stage 3: 100% data for final training
 if args.stage == 1:
-    train_df = train_df.tail(int(len(train_df) * 0.15))
+    train_df = train_df.tail(int(len(train_df) * 0.10))
+elif args.stage == 2:
+    train_df = train_df.tail(int(len(train_df) * 0.33))
 
 model = lgb.LGBMRegressor(**params)
 model.fit(
