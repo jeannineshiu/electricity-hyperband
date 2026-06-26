@@ -34,11 +34,14 @@ if args.stage == 1:
 elif args.stage == 2:
     train_df = train_df.tail(int(len(train_df) * 0.33))
 
+# More patience for later stages: Stage 1 fast screen, Stage 3 thorough training
+early_stop_rounds = {1: 10, 2: 30, 3: 100}.get(args.stage, 10)
+
 model = lgb.LGBMRegressor(**params)
 model.fit(
     train_df[FEATURE_COLS], train_df[TARGET_COL],
     eval_set=[(val_df[FEATURE_COLS], val_df[TARGET_COL])],
-    callbacks=[lgb.early_stopping(10, verbose=False)],
+    callbacks=[lgb.early_stopping(early_stop_rounds, verbose=False)],
 )
 
 result = {

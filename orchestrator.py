@@ -5,7 +5,7 @@ from daytona import Daytona, CreateSandboxFromSnapshotParams
 SNAPSHOT  = "elec-forecast-v2"
 REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
 N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
-N_BATCHES = 2   # Stage 1 batches → 18 configs total
+N_BATCHES = 3   # Stage 1 batches → 27 configs total
 TOP_S2    = 6   # top configs advancing to Stage 2
 TOP_S3    = 2   # top configs advancing to Stage 3
 BASELINE  = 7.23
