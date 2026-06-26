@@ -1,6 +1,8 @@
 import json, random, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from daytona import Daytona, CreateSandboxFromSnapshotParams
+import mlflow
+from tracking.mlflow_logger import start_experiment, log_trial, log_hyperband_summary
 
 SNAPSHOT  = "elec-forecast-v2"
 REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
@@ -11,7 +13,6 @@ TOP_S3    = 5   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
 # Known good configs from previous runs — always included in Stage 2
-# Best known params (test_mae=7.1754) + local search variations via different random_state
 _BEST = {
     "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
     "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
@@ -19,29 +20,30 @@ _BEST = {
     "n_jobs": -1, "verbose": -1,
 }
 SEED_PARAMS = [
-    {**_BEST, "random_state": 42},   # original best
-    {**_BEST, "random_state": 123},  # variation 1
-    {**_BEST, "random_state": 456},  # variation 2
-    {**_BEST, "random_state": 789},  # variation 3
-    {**_BEST, "learning_rate": 0.01, "random_state": 42},  # lower LR variation
+    {**_BEST, "random_state": 42},
+    {**_BEST, "random_state": 123},
+    {**_BEST, "random_state": 456},
+    {**_BEST, "random_state": 789},
+    {**_BEST, "learning_rate": 0.01, "random_state": 42},
 ]
 
 daytona = Daytona()
 
+
 def sample_params():
     return {
-        # Low LR + many trees → better generalization to 2024
         "n_estimators":      random.choice([1000, 1500, 2000, 3000, 5000]),
         "max_depth":         random.randint(3, 6),
         "learning_rate":     random.choice([0.003, 0.005, 0.01, 0.02, 0.03]),
-        "num_leaves":        random.randint(15, 63),        # cap at 63 (2^6-1) for depth-6 trees
+        "num_leaves":        random.randint(15, 63),
         "subsample":         round(random.uniform(0.6, 0.9), 2),
         "colsample_bytree":  round(random.uniform(0.6, 0.9), 2),
-        "min_child_samples": random.randint(20, 100),       # higher → more regularization
+        "min_child_samples": random.randint(20, 100),
         "reg_alpha":         round(random.uniform(0.0, 2.0), 2),
         "reg_lambda":        round(random.uniform(0.1, 2.0), 2),
         "random_state":      42, "n_jobs": -1, "verbose": -1,
     }
+
 
 def run_sandbox(params, stage):
     sb = daytona.create(CreateSandboxFromSnapshotParams(snapshot=SNAPSHOT))
@@ -69,7 +71,8 @@ with open('/tmp/config.json', 'w') as f:
     finally:
         sb.delete()
 
-def run_parallel(configs, stage):
+
+def run_parallel(configs, stage, batch=None):
     results = []
     with ThreadPoolExecutor(max_workers=len(configs)) as ex:
         futures = {ex.submit(run_sandbox, cfg, stage): cfg for cfg in configs}
@@ -78,50 +81,70 @@ def run_parallel(configs, stage):
                 r = f.result()
                 results.append(r)
                 print(f"    stage={stage} val_mae={r['val_mae']:.4f}")
+                log_trial(r["params"], r["val_mae"], r["test_mae"], stage, batch)
             except Exception as e:
                 print(f"    [SKIP] {e}")
     return results
 
-# ── Stage 1: 2 batches × 9 sandboxes × 10% data ──────────────
-t_start = time.time()
-n_total = N_BATCH * N_BATCHES
-print(f"Stage 1: {N_BATCHES} batches × {N_BATCH} sandboxes × 10% data  ({n_total} configs total)")
-all_s1 = []
-for b in range(N_BATCHES):
-    print(f"  Batch {b + 1}/{N_BATCHES}:")
-    configs = [sample_params() for _ in range(N_BATCH)]
-    all_s1.extend(run_parallel(configs, stage=1))
 
-if not all_s1:
-    raise RuntimeError("All Stage 1 sandboxes failed.")
-all_s1.sort(key=lambda x: x["val_mae"])
-survivors_s2 = all_s1[:TOP_S2]
+# ── MLflow setup ──────────────────────────────────────────────
+start_experiment("electricity-hyperband")
 
-# Inject known-good seed params directly into Stage 2
-for seed in SEED_PARAMS:
-    survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
-print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
+with mlflow.start_run(run_name="hyperband_search"):
+    mlflow.log_param("n_batches", N_BATCHES)
+    mlflow.log_param("n_batch",   N_BATCH)
+    mlflow.log_param("top_s2",    TOP_S2)
+    mlflow.log_param("top_s3",    TOP_S3)
+    mlflow.log_param("baseline",  BASELINE)
 
-# ── Stage 2: Top 6 × 33% data ─────────────────────────────────
-print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
-s2_results = run_parallel([r["params"] for r in survivors_s2], stage=2)
+    # ── Stage 1: N_BATCHES × N_BATCH sandboxes × 10% data ────
+    t_start = time.time()
+    n_total = N_BATCH * N_BATCHES
+    print(f"Stage 1: {N_BATCHES} batches × {N_BATCH} sandboxes × 10% data  ({n_total} configs total)")
+    all_s1 = []
+    for b in range(N_BATCHES):
+        print(f"  Batch {b + 1}/{N_BATCHES}:")
+        configs = [sample_params() for _ in range(N_BATCH)]
+        all_s1.extend(run_parallel(configs, stage=1, batch=b + 1))
 
-if not s2_results:
-    raise RuntimeError("All Stage 2 sandboxes failed.")
-s2_results.sort(key=lambda x: x["val_mae"])
-survivors_s3 = s2_results[:TOP_S3]
-print(f"\nStage 2 → Top {TOP_S3} val_MAE: {[round(r['val_mae'], 4) for r in survivors_s3]}")
+    if not all_s1:
+        raise RuntimeError("All Stage 1 sandboxes failed.")
+    all_s1.sort(key=lambda x: x["val_mae"])
+    survivors_s2 = all_s1[:TOP_S2]
 
-# ── Stage 3: Top 2 × 100% data ────────────────────────────────
-print(f"\nStage 3: {len(survivors_s3)} sandboxes × 100% data")
-s3_results = run_parallel([r["params"] for r in survivors_s3], stage=3)
+    for seed in SEED_PARAMS:
+        survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
+    print(f"\nStage 1 → Top {TOP_S2} + {len(SEED_PARAMS)} seeds → Stage 2 ({len(survivors_s2)} total)")
 
-if not s3_results:
-    raise RuntimeError("All Stage 3 sandboxes failed.")
-best = min(s3_results, key=lambda x: x["test_mae"])
+    # ── Stage 2: survivors × 33% data ────────────────────────
+    print(f"\nStage 2: {len(survivors_s2)} sandboxes × 33% data")
+    s2_results = run_parallel([r["params"] for r in survivors_s2], stage=2)
 
-elapsed = time.time() - t_start
-mins, secs = divmod(int(elapsed), 60)
+    if not s2_results:
+        raise RuntimeError("All Stage 2 sandboxes failed.")
+    s2_results.sort(key=lambda x: x["val_mae"])
+    survivors_s3 = s2_results[:TOP_S3]
+    print(f"\nStage 2 → Top {TOP_S3} val_MAE: {[round(r['val_mae'], 4) for r in survivors_s3]}")
+
+    # ── Stage 3: top survivors × 100% data ───────────────────
+    print(f"\nStage 3: {len(survivors_s3)} sandboxes × 100% data")
+    s3_results = run_parallel([r["params"] for r in survivors_s3], stage=3)
+
+    if not s3_results:
+        raise RuntimeError("All Stage 3 sandboxes failed.")
+    best = min(s3_results, key=lambda x: x["test_mae"])
+
+    elapsed = time.time() - t_start
+    mins, secs = divmod(int(elapsed), 60)
+
+    # ── Log summary to MLflow ─────────────────────────────────
+    log_hyperband_summary(
+        best_params=best["params"],
+        best_test_mae=best["test_mae"],
+        baseline=BASELINE,
+        n_total=n_total,
+        elapsed_sec=int(elapsed),
+    )
 
 print(f"\n{'='*50}")
 print(f"Total wall-clock time                    : {mins}m {secs}s")
@@ -130,5 +153,5 @@ print(f"Baseline (Optuna 30 trials, sequential)  : {BASELINE}")
 print(f"Hyperband 3-stage ({N_BATCHES}×{N_BATCH}→{TOP_S2}→{TOP_S3})          : {best['test_mae']:.4f}")
 print(f"Delta                                    : {BASELINE - best['test_mae']:+.4f} EUR/MWh")
 print(f"\nBest params (seed for next run):")
-import json as _json
-print(_json.dumps(best["params"], indent=2))
+print(json.dumps(best["params"], indent=2))
+print(f"\nMLflow UI: run `mlflow ui` then open http://localhost:5000")
