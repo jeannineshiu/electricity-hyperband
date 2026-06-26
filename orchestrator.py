@@ -6,18 +6,24 @@ SNAPSHOT  = "elec-forecast-v2"
 REPO_URL  = "https://github.com/jeannineshiu/electricity-hyperband"
 N_BATCH   = 9   # sandboxes per batch (within the 10-sandbox concurrency limit)
 N_BATCHES = 4   # Stage 1 batches → 36 configs total
-TOP_S2    = 9   # top configs advancing to Stage 2 (wider funnel = less premature elimination)
+TOP_S2    = 5   # top configs advancing to Stage 2
 TOP_S3    = 5   # top configs advancing to Stage 3
 BASELINE  = 7.23
 
 # Known good configs from previous runs — always included in Stage 2
+# Best known params (test_mae=7.1754) + local search variations via different random_state
+_BEST = {
+    "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
+    "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
+    "min_child_samples": 36, "reg_alpha": 1.26, "reg_lambda": 1.96,
+    "n_jobs": -1, "verbose": -1,
+}
 SEED_PARAMS = [
-    {
-        "n_estimators": 5000, "max_depth": 5, "learning_rate": 0.02,
-        "num_leaves": 47, "subsample": 0.86, "colsample_bytree": 0.89,
-        "min_child_samples": 36, "reg_alpha": 1.26, "reg_lambda": 1.96,
-        "random_state": 42, "n_jobs": -1, "verbose": -1,
-    }
+    {**_BEST, "random_state": 42},   # original best
+    {**_BEST, "random_state": 123},  # variation 1
+    {**_BEST, "random_state": 456},  # variation 2
+    {**_BEST, "random_state": 789},  # variation 3
+    {**_BEST, "learning_rate": 0.01, "random_state": 42},  # lower LR variation
 ]
 
 daytona = Daytona()
