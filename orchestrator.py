@@ -14,15 +14,16 @@ daytona = Daytona()
 
 def sample_params():
     return {
-        "n_estimators":      random.choice([200, 400, 600, 800, 1000]),
-        "max_depth":         random.randint(3, 8),
-        "learning_rate":     random.choice([0.01, 0.03, 0.05, 0.1, 0.2]),
-        "num_leaves":        random.randint(20, 150),
-        "subsample":         round(random.uniform(0.6, 1.0), 2),
-        "colsample_bytree":  round(random.uniform(0.6, 1.0), 2),
-        "min_child_samples": random.randint(5, 50),
-        "reg_alpha":         round(random.uniform(0.0, 1.0), 2),
-        "reg_lambda":        round(random.uniform(0.0, 1.0), 2),
+        # More trees with lower LR → better generalization
+        "n_estimators":      random.choice([500, 800, 1000, 1500, 2000]),
+        "max_depth":         random.randint(3, 6),          # shallower trees reduce overfitting
+        "learning_rate":     random.choice([0.005, 0.01, 0.03, 0.05]),
+        "num_leaves":        random.randint(15, 63),        # cap at 63 (2^6-1) for depth-6 trees
+        "subsample":         round(random.uniform(0.6, 0.9), 2),
+        "colsample_bytree":  round(random.uniform(0.6, 0.9), 2),
+        "min_child_samples": random.randint(20, 100),       # higher → more regularization
+        "reg_alpha":         round(random.uniform(0.0, 2.0), 2),
+        "reg_lambda":        round(random.uniform(0.1, 2.0), 2),
         "random_state":      42, "n_jobs": -1, "verbose": -1,
     }
 
