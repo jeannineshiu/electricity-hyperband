@@ -211,6 +211,23 @@ def run_hyperband():
     print(json.dumps(best["params"], indent=2))
     print(f"\nMLflow UI: run `mlflow ui --port 5001` then open http://localhost:5001")
 
+    # Save to agent run history so the LLM agent can learn from past runs
+    try:
+        from datetime import datetime
+        from agent.history import save as save_history
+        save_history({
+            "timestamp":     datetime.now().isoformat(),
+            "model_type":    MODEL_TYPE,
+            "n_trials":      n_total,
+            "reasoning":     "CLI hyperband run",
+            "search_space":  "orchestrator default",
+            "best_test_mae": best["test_mae"],
+            "best_val_mae":  best["val_mae"],
+            "best_params":   best["params"],
+        })
+    except Exception:
+        pass  # history logging is optional
+
 
 if __name__ == "__main__":
     run_hyperband()
