@@ -69,7 +69,7 @@ Results were only printed to stdout — no way to compare runs across sessions o
 | **Resource cost** | Local CPU tied up during training | Compute runs remotely; local machine stays free |
 | **Fault tolerance** | One crash stops everything | Failed sandboxes are skipped; search continues |
 | **Reproducibility** | "Works on my machine" | Same snapshot = identical environment, always |
-| **Scalability** | Rewrite needed to go parallel | Change one number (`N_BATCH = 9 → 90`) |
+| **Scalability** | Rewrite needed to go parallel | Change one number (`N_BATCH = 9 → 90`) — no orchestration code changes, only account tier |
 
 ---
 
