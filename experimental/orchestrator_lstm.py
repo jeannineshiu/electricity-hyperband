@@ -38,7 +38,7 @@ with open('/tmp/config.json', 'w') as f:
     json.dump({params}, f)
 """)
         train_resp = sb.process.exec(
-            f"python $HOME/project/sandbox_train_lstm.py "
+            f"python $HOME/project/experimental/sandbox_train_lstm.py "
             f"--config /tmp/config.json --stage {stage}"
         )
         if train_resp.exit_code != 0:

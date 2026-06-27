@@ -111,11 +111,8 @@ Or select from the dropdown in the Streamlit dashboard — **no code changes nee
 ```
 electricity-hyperband/
 ├── orchestrator.py           # Hyperband loop + model selector + MLflow
-├── orchestrator_lstm.py      # LSTM variant
 ├── sandbox_train.py          # Generic training script (LGB/XGB/CatBoost/RF)
-├── sandbox_train_lstm.py     # LSTM training script
 ├── setup_snapshot_v3.py      # One-time setup: snapshot with all 4 model packages
-├── setup_snapshot_lstm.py    # One-time setup: LSTM snapshot
 ├── tracking/
 │   ├── __init__.py
 │   └── mlflow_logger.py      # MLflow helpers
@@ -127,6 +124,11 @@ electricity-hyperband/
 │   ├── history.py            # Run history load/save (shared by CLI + agent)
 │   ├── ml_engineer.py        # LLM agent — Claude API + tool use
 │   └── run_history.json      # Persistent experiment memory (auto-generated)
+├── experimental/             # Architecturally complete, not yet verified end-to-end
+│   ├── README.md             # Known issues + how to resume development
+│   ├── orchestrator_lstm.py
+│   ├── sandbox_train_lstm.py
+│   └── setup_snapshot_lstm.py
 └── data/
     └── features_2020_2024.parquet
 ```
