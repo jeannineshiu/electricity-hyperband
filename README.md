@@ -13,6 +13,52 @@ Built in **5 hours** for the [Daytona](https://daytona.io) Hackathon.
 
 ---
 
+## Development Journey
+
+### Hackathon (5 hours) — Core Foundation
+
+Built and shipped during the Daytona Hackathon:
+
+- 3-stage Hyperband orchestrator running 9 Daytona sandboxes in parallel
+- LightGBM hyperparameter search across 36 configurations
+- Beat the Optuna sequential baseline: **7.1754 vs 7.23 EUR/MWh**
+
+### After the Hackathon — 4 Layers Added
+
+After the hackathon, I identified four gaps and extended the project layer by layer:
+
+**Layer 1 — Real-time Dashboard**
+
+The CLI output told you a result had arrived, but not what was happening *right now*. Added a Streamlit dashboard where the leaderboard updates live as each sandbox completes — you can watch the parallel execution happen in real time.
+
+**Layer 2 — Generic Model Interface**
+
+The original pipeline had LightGBM hardcoded in `sandbox_train.py`. Refactored to a plugin model: adding XGBoost, CatBoost, or Random Forest required zero changes to the Hyperband algorithm. The search space and defaults live in `models/registry.py`; the orchestration layer never needs to know which model is running.
+
+> "I didn't build a LightGBM tuner. I built a generic HPO framework where the model is a plugin."
+
+**Layer 3 — LLM Agent**
+
+The Hyperband search could find good configs, but it couldn't *diagnose* why results were bad or *decide* what to search next. Added a Claude-powered agent with two tools: one to read experiment history, one to launch a targeted Hyperband search. The agent reads past runs, identifies patterns, proposes a refined search space, launches Daytona sandboxes autonomously, and returns a structured report.
+
+```
+User: "My val MAE is 6.0 but test MAE is 7.5 — clear overfitting."
+  ↓
+Agent reads run history → identifies the val/test gap pattern
+  ↓
+Agent proposes: increase regularization, reduce num_leaves
+  ↓
+Agent launches 9 parallel Daytona sandboxes
+  ↓
+Agent: "Found test_mae 7.35. Gap narrowed from 1.5 → 1.12. Next: try CatBoost."
+```
+
+**Layer 4 — Experiment Tracking**
+
+Results were only printed to stdout — no way to compare runs across sessions or identify which hyperparameters correlated with better MAE. Integrated MLflow: every trial is a nested run under a parent `hyperband_search` run, with full hyperparameters, stage-level MAE, and wall-clock time. The agent also maintains `run_history.json` so it remembers what's been tried across sessions.
+
+---
+
 ## Why Daytona?
 
 | | Traditional (local) | With Daytona |
