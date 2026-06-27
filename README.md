@@ -17,45 +17,103 @@ Built in **5 hours** for the [Daytona](https://daytona.io) Hackathon.
 
 ### Hackathon (5 hours) — Core Foundation
 
-Built and shipped during the Daytona Hackathon:
+Built and shipped during the Daytona Hackathon. Beat the baseline on the first day.
 
-- 3-stage Hyperband orchestrator running 9 Daytona sandboxes in parallel
-- LightGBM hyperparameter search across 36 configurations
-- Beat the Optuna sequential baseline: **7.1754 vs 7.23 EUR/MWh**
+```
+orchestrator.py
+      ↓
+daytona_executor  →  9 Daytona sandboxes (parallel)
+      ↓
+sandbox_train.py  →  train + evaluate
+      ↓
+collect results   →  sort by val_mae
+      ↓
+promote survivors →  next stage with more data
+      ↓
+Stage 1 (10%) → Stage 2 (33%) → Stage 3 (100%)
+```
+
+| Engineering Capability | What it demonstrates |
+|---|---|
+| **Complete orchestration pipeline** | Not just a training script. A full system: orchestrator → Daytona → sandbox → collect results → promote → next stage. Shows understanding of ML systems, not just ML models. |
+| **Distributed systems thinking** | 36 configs enter → 9 survive Stage 1 → 5 survive Stage 2 → 1 winner. Multi-stage tournament elimination mirrors how production HPO frameworks (Ray Tune, Optuna Distributed) allocate compute. |
+| **Resource-aware scheduling** | Progressive data loading (10%→33%→100%) is the core insight of Hyperband: spend almost no compute on bad configs, and full compute only on proven candidates. This is the same principle as curriculum learning and progressive training in large model training. |
+| **Genuine infrastructure usage** | Daytona Snapshots eliminate per-sandbox install overhead. Parallel sandboxes run concurrently with `ThreadPoolExecutor`. `sb.delete()` in `finally` blocks ensures zero idle cost. Not a demo wrapper — actual production patterns. |
+
+---
 
 ### After the Hackathon — 4 Layers Added
 
-After the hackathon, I identified four gaps and extended the project layer by layer:
+---
 
 **Layer 1 — Real-time Dashboard**
 
-The CLI output told you a result had arrived, but not what was happening *right now*. Added a Streamlit dashboard where the leaderboard updates live as each sandbox completes — you can watch the parallel execution happen in real time.
+The CLI printed results as they arrived, but gave no sense of parallelism happening — a user watching the terminal couldn't tell if 1 or 9 sandboxes were running. Built a Streamlit dashboard where the leaderboard updates live as each sandbox completes.
+
+| Engineering Capability | What it demonstrates |
+|---|---|
+| **Streaming architecture** | `stream_stage()` is a Python generator that yields one result per sandbox as it finishes. The dashboard consumes this stream directly — results appear one by one, not in a batch at the end. This is the same event-driven pattern used in real-time ML monitoring systems. |
+| **Decoupled UI from algorithm** | The dashboard is a pure consumer of `stream_stage()`. Zero changes to Hyperband, the executor, or the training script. Demonstrates interface design: the algorithm doesn't know or care who is listening to its output. |
+| **Observability as a first-class concern** | You can't improve what you can't see. Making parallelism *visible* — watching 9 results land nearly simultaneously — is what turns an infrastructure claim into something a stakeholder can actually verify. |
+
+![Dashboard](docs/screenshots/dashboard_01.png)
+
+![Dashboard](docs/screenshots/dashboard_02.png)
+
+![Dashboard](docs/screenshots/dashboard_03.png)
+
+---
 
 **Layer 2 — Generic Model Interface**
 
-The original pipeline had LightGBM hardcoded in `sandbox_train.py`. Refactored to a plugin model: adding XGBoost, CatBoost, or Random Forest required zero changes to the Hyperband algorithm. The search space and defaults live in `models/registry.py`; the orchestration layer never needs to know which model is running.
+The original pipeline had LightGBM hard-coded across `sandbox_train.py` and `orchestrator.py`. Switching to XGBoost would have required editing both files and understanding both codebases. Refactored to a plugin architecture: `MODEL_TYPE = "xgboost"` in `config.py` switches the entire pipeline.
+
+| Engineering Capability | What it demonstrates |
+|---|---|
+| **Plugin / registry pattern** | `models/registry.py` is a single source of truth: model defaults, valid hyperparameter bounds, and sampling functions all live in one place. Adding a new model is adding one entry to each dict. |
+| **Interface contract** | `sandbox_train.py` exposes a `--model` flag. Each model has its own `fit_*()` function handling framework-specific APIs (LightGBM uses callbacks, XGBoost uses `early_stopping_rounds` in `fit()`, CatBoost requires `bootstrap_type="Bernoulli"` for row sampling). The Hyperband algorithm sees none of this — it only sees `val_mae` and `test_mae`. |
+| **Separation of concerns** | The search algorithm (Hyperband) is now fully decoupled from the model implementation. This is the open/closed principle in ML systems: the framework is closed for modification, open for extension. |
 
 > "I didn't build a LightGBM tuner. I built a generic HPO framework where the model is a plugin."
 
+---
+
 **Layer 3 — LLM Agent**
 
-The Hyperband search could find good configs, but it couldn't *diagnose* why results were bad or *decide* what to search next. Added a Claude-powered agent with two tools: one to read experiment history, one to launch a targeted Hyperband search. The agent reads past runs, identifies patterns, proposes a refined search space, launches Daytona sandboxes autonomously, and returns a structured report.
+The Hyperband search could find good configs, but it was stateless — it had no memory of past runs and couldn't reason about *why* results were good or bad. Added a Claude claude-opus-4-8 agent with tool use: it reads experiment history, diagnoses the problem, proposes a targeted search space, and launches Daytona sandboxes autonomously.
 
 ```
 User: "My val MAE is 6.0 but test MAE is 7.5 — clear overfitting."
   ↓
 Agent reads run history → identifies the val/test gap pattern
   ↓
-Agent proposes: increase regularization, reduce num_leaves
+Agent proposes: increase reg_lambda, reduce num_leaves, higher min_child_samples
   ↓
-Agent launches 9 parallel Daytona sandboxes
+Agent launches 9 parallel Daytona sandboxes with refined search space
   ↓
 Agent: "Found test_mae 7.35. Gap narrowed from 1.5 → 1.12. Next: try CatBoost."
 ```
 
+| Engineering Capability | What it demonstrates |
+|---|---|
+| **Tool-augmented LLM** | Claude doesn't generate text about hyperparameters — it calls real tools that launch actual Daytona sandboxes. `launch_hyperband` is a blocking tool call that returns only after all sandboxes complete. This is the agentic pattern: LLM as orchestrator, not just text generator. |
+| **Persistent memory across sessions** | `run_history.json` gives the agent long-term memory. On each call, the agent reads what has been tried before — which models, which search spaces, what results — so it doesn't repeat failed experiments. |
+| **Closed-loop experimentation** | Read → Diagnose → Propose → Execute → Report. A full scientific experimentation loop, automated. This mirrors how AutoML systems like Google Vizier work internally, but with an LLM as the strategy layer instead of a Bayesian optimizer. |
+| **Safety guardrails** | `_validate_search_space()` prevents the agent from proposing values outside safe bounds (e.g., `learning_rate=999`, `max_depth=-1`). LLMs hallucinate; the tool layer must validate before executing. |
+
+---
+
 **Layer 4 — Experiment Tracking**
 
-Results were only printed to stdout — no way to compare runs across sessions or identify which hyperparameters correlated with better MAE. Integrated MLflow: every trial is a nested run under a parent `hyperband_search` run, with full hyperparameters, stage-level MAE, and wall-clock time. The agent also maintains `run_history.json` so it remembers what's been tried across sessions.
+Results were only available in the current terminal session. There was no way to compare runs across sessions, identify which hyperparameters correlated with better MAE, or give the agent structured access to history. Integrated MLflow and a shared `run_history.json`.
+
+| Engineering Capability | What it demonstrates |
+|---|---|
+| **Hierarchical experiment tracking** | Parent run = one Hyperband search. Nested runs = each individual trial, tagged with `stage` and `batch`. This mirrors how Weights & Biases and MLflow are used in production: sweeps contain runs contain metrics. |
+| **Dual observability layers** | MLflow (CLI path) provides structured, queryable metrics for humans and dashboards. `run_history.json` (all paths) provides agent-readable history in a format the LLM can reason over. Two consumers with different needs get different representations of the same data. |
+| **Cross-session comparability** | Every trial — its hyperparameters, val MAE, test MAE, stage, and wall-clock time — is logged permanently. This enables questions like "which `num_leaves` values consistently produced low test MAE?" that are impossible without persistent tracking. |
+
+![MLflow UI](docs/screenshots/mlflow_ui.png)
 
 ---
 
@@ -180,22 +238,6 @@ graph TB
     DASH --> HISTORY
     AGENT --> HISTORY
 ```
-
----
-
-## Real-time Dashboard
-
-![Dashboard](docs/screenshots/dashboard_01.png)
-
-![Dashboard](docs/screenshots/dashboard_02.png)
-
-![Dashboard](docs/screenshots/dashboard_03.png)
-
----
-
-## MLflow Tracking
-
-![MLflow UI](docs/screenshots/mlflow_ui.png)
 
 ---
 
