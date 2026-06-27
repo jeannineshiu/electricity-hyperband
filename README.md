@@ -24,6 +24,26 @@ The Hyperband is designed as a **generic HPO framework** — the model is a plug
 
 ## Architecture
 
+### How the system works
+
+The system has **three entry points** that all share the same core engine:
+
+- **CLI** (`orchestrator.py`) — runs the full 3-stage Hyperband search from the terminal, logs everything to MLflow
+- **Dashboard** (`dashboard/app.py`) — same search with a live Streamlit UI showing the leaderboard as each sandbox completes
+- **LLM Agent** (`agent/ml_engineer.py`) — Claude claude-opus-4-8 reads past run history, diagnoses problems, and autonomously launches targeted searches
+
+All three entry points read from the same **`config.py`** (model type, batch size, snapshot name) and call the same **`hyperband.stream_stage()`** to run sandboxes.
+
+When a search starts, this is what happens step by step:
+
+1. **`models/registry.py`** samples a hyperparameter config for the chosen model
+2. **`daytona_executor.py`** creates a Daytona sandbox from a pre-built snapshot (packages already installed — no setup overhead)
+3. The sandbox clones the GitHub repo, writes the config, and runs **`sandbox_train.py`** with one of four models (LightGBM / XGBoost / CatBoost / Random Forest)
+4. Training completes and the result is streamed back to **`hyperband.stream_stage()`**
+5. Up to 9 sandboxes run simultaneously — all returning results as they finish
+6. After Stage 1, the worst configs are eliminated. Survivors train on more data in Stage 2, and the best train on the full dataset in Stage 3
+7. Every result is saved to **MLflow** (CLI path) and **`run_history.json`** (all paths), so the agent remembers what's been tried across sessions
+
 ```mermaid
 graph TB
     %% ── Entry Points ──────────────────────────────────────────
