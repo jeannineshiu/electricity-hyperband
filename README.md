@@ -22,6 +22,75 @@ The Hyperband is designed as a **generic HPO framework** — the model is a plug
 
 ---
 
+## Architecture
+
+```mermaid
+graph TB
+    %% ── Entry Points ──────────────────────────────────────────
+    subgraph UI ["👤 Entry Points"]
+        CLI["🖥️ CLI\norchestrator.py"]
+        DASH["📊 Dashboard\ndashboard/app.py\nStreamlit"]
+        AGENT["🤖 LLM Agent\nagent/ml_engineer.py\nClaude claude-opus-4-8"]
+    end
+
+    %% ── Core Local Modules ────────────────────────────────────
+    subgraph CORE ["💻 Local Core"]
+        CONFIG["⚙️ config.py\nMODEL_TYPE · N_BATCH\nSNAPSHOT · BASELINE"]
+        REGISTRY["📦 models/registry.py\nMODEL_DEFAULTS · MODEL_BOUNDS\nParam Samplers · Seeds"]
+        HYPERBAND["🔀 hyperband.py\nstream_stage()\nThreadPoolExecutor"]
+        EXECUTOR["🧱 daytona_executor.py\nrun_sandbox()\nDaytona SDK"]
+    end
+
+    %% ── Observability ─────────────────────────────────────────
+    subgraph OBS ["📈 Observability"]
+        MLFLOW["📉 MLflow\ntracking/mlflow_logger.py\nExperiment · Nested Runs"]
+        HISTORY["🗂️ Run History\nagent/history.py\nrun_history.json"]
+    end
+
+    %% ── Remote Services ───────────────────────────────────────
+    subgraph REMOTE ["☁️ Remote"]
+        CLAUDE["🧠 Claude API\nclaude-opus-4-8\nTool Use"]
+        DAYTONA["⚡ Daytona Platform\nSnapshot elec-forecast-v3\n9 sandboxes ∥"]
+        GITHUB["📁 GitHub\njeannineshiu/\nelectricity-hyperband"]
+    end
+
+    %% ── Daytona Sandbox ───────────────────────────────────────
+    subgraph SB ["🔲 Daytona Sandbox × 9 parallel"]
+        TRAIN["🏋️ sandbox_train.py\nLightGBM · XGBoost\nCatBoost · Random Forest"]
+        DATA["🗄️ ENTSO-E Data\nfeatures_2020_2024.parquet\n43,680 hourly rows"]
+    end
+
+    %% ── Flows ─────────────────────────────────────────────────
+    CLI     --> CONFIG
+    DASH    --> CONFIG
+    AGENT   --> CONFIG
+    AGENT   <--> CLAUDE
+
+    CONFIG   --> REGISTRY
+    CONFIG   --> EXECUTOR
+    REGISTRY --> HYPERBAND
+    HYPERBAND --> EXECUTOR
+    EXECUTOR --> DAYTONA
+
+    DAYTONA  --> SB
+    SB       --> GITHUB
+    GITHUB   --> TRAIN
+    DATA     --> TRAIN
+    TRAIN    -->|result.json| EXECUTOR
+
+    EXECUTOR -->|results stream| HYPERBAND
+    HYPERBAND -->|yield| CLI
+    HYPERBAND -->|yield| DASH
+    HYPERBAND -->|yield| AGENT
+
+    CLI   --> MLFLOW
+    CLI   --> HISTORY
+    DASH  --> HISTORY
+    AGENT --> HISTORY
+```
+
+---
+
 ## Results
 
 | Method | Trials | Style | Test MAE |
