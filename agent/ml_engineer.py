@@ -16,8 +16,9 @@ from datetime import datetime
 import anthropic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import orchestrator as orch
-from orchestrator import MODEL_DEFAULTS as _DEFAULTS, MODEL_BOUNDS as _BOUNDS
+import config
+from models.registry import MODEL_DEFAULTS as _DEFAULTS, MODEL_BOUNDS as _BOUNDS
+from hyperband import stream_stage
 from agent.history import load as load_history, save as save_history
 
 MODEL_ID = "claude-opus-4-8"
@@ -144,10 +145,10 @@ def _make_sampler(model_type: str, search_space: dict):
 
 def _run_mini_hyperband(model_type: str, sampler, n_trials: int) -> dict:
     """3-stage mini-Hyperband: n_trials → top 3 → best 1."""
-    orch.MODEL_TYPE = model_type
+    config.MODEL_TYPE = model_type
 
     print(f"\n  [Stage 1] {n_trials} configs × 10% data", flush=True)
-    s1 = [r for r in orch.stream_stage([sampler() for _ in range(n_trials)], stage=1)]
+    s1 = [r for r in stream_stage([sampler() for _ in range(n_trials)], stage=1)]
     if not s1:
         return {"error": "All Stage 1 sandboxes failed"}
     s1.sort(key=lambda x: x["val_mae"])
@@ -155,7 +156,7 @@ def _run_mini_hyperband(model_type: str, sampler, n_trials: int) -> dict:
     print(f"  [Stage 1] top-3 val_mae: {[round(r['val_mae'], 4) for r in top3]}", flush=True)
 
     print(f"\n  [Stage 2] {len(top3)} configs × 33% data", flush=True)
-    s2 = [r for r in orch.stream_stage([r["params"] for r in top3], stage=2)]
+    s2 = [r for r in stream_stage([r["params"] for r in top3], stage=2)]
     if not s2:
         return {"error": "All Stage 2 sandboxes failed"}
     s2.sort(key=lambda x: x["val_mae"])
@@ -163,7 +164,7 @@ def _run_mini_hyperband(model_type: str, sampler, n_trials: int) -> dict:
     print(f"  [Stage 2] best val_mae: {best_s2['val_mae']:.4f}", flush=True)
 
     print(f"\n  [Stage 3] 1 config × 100% data", flush=True)
-    s3 = [r for r in orch.stream_stage([best_s2["params"]], stage=3)]
+    s3 = [r for r in stream_stage([best_s2["params"]], stage=3)]
     if not s3:
         return {"error": "Stage 3 failed"}
 

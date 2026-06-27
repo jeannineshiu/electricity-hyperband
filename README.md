@@ -110,8 +110,14 @@ Or select from the dropdown in the Streamlit dashboard — **no code changes nee
 
 ```
 electricity-hyperband/
-├── orchestrator.py           # Hyperband loop + model selector + MLflow
-├── sandbox_train.py          # Generic training script (LGB/XGB/CatBoost/RF)
+├── config.py                 # All constants (SNAPSHOT, MODEL_TYPE, N_BATCH…)
+├── models/
+│   ├── __init__.py
+│   └── registry.py           # MODEL_DEFAULTS, MODEL_BOUNDS, param samplers, seeds
+├── daytona_executor.py       # Daytona client + run_sandbox()
+├── hyperband.py              # stream_stage() — pure parallel search, no MLflow
+├── orchestrator.py           # run_parallel() + run_hyperband() — CLI entry point
+├── sandbox_train.py          # Generic training script (runs inside Daytona sandbox)
 ├── setup_snapshot_v3.py      # One-time setup: snapshot with all 4 model packages
 ├── tracking/
 │   ├── __init__.py

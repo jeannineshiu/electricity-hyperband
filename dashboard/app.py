@@ -5,11 +5,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import orchestrator as orch
-from orchestrator import (
-    stream_stage, get_seed_params,
-    N_BATCH, N_BATCHES, TOP_S2, TOP_S3, BASELINE,
-)
+import config
+from models.registry import sample_params, get_seed_params
+from hyperband import stream_stage
 from agent.history import save as save_history
 
 st.set_page_config(
@@ -19,13 +17,14 @@ st.set_page_config(
 )
 
 st.title("⚡ Electricity Price — Hyperband Dashboard")
-st.caption("Parallel hyperparameter search with Daytona sandboxes · LightGBM · ENTSO-E 2020–2024")
+st.caption("Parallel hyperparameter search with Daytona sandboxes · ENTSO-E 2020–2024")
 
 # ── Pipeline overview ──────────────────────────────────────────
 c1, c2, c3 = st.columns(3)
-c1.metric("Stage 1", f"{N_BATCH * N_BATCHES} configs", f"{N_BATCH} sandboxes / batch · 10% data")
-c2.metric("Stage 2", f"Top {TOP_S2} + seeds", "33% data")
-c3.metric("Stage 3", f"Top {TOP_S3}", "100% data · full training")
+c1.metric("Stage 1", f"{config.N_BATCH * config.N_BATCHES} configs",
+          f"{config.N_BATCH} sandboxes / batch · 10% data")
+c2.metric("Stage 2", f"Top {config.TOP_S2} + seeds", "33% data")
+c3.metric("Stage 3", f"Top {config.TOP_S3}", "100% data · full training")
 
 # ── Model selector ─────────────────────────────────────────────
 model_choice = st.selectbox(
@@ -38,7 +37,7 @@ model_choice = st.selectbox(
         "rf":       "Random Forest",
     }[x],
 )
-orch.MODEL_TYPE = model_choice  # update module-level variable
+config.MODEL_TYPE = model_choice
 
 st.divider()
 
@@ -47,7 +46,7 @@ if not st.button("▶ Start Hyperband Search", type="primary"):
     st.stop()
 
 # ── Search starts ──────────────────────────────────────────────
-n_total  = N_BATCH * N_BATCHES
+n_total  = config.N_BATCH * config.N_BATCHES
 t_start  = time.time()
 all_rows: list[dict] = []
 
@@ -79,18 +78,18 @@ def refresh(completed: int, stage: int):
     best_box.metric(
         "Best val_mae so far",
         f"{best_val:.4f}",
-        delta=f"{BASELINE - best_val:+.4f} vs baseline {BASELINE}",
+        delta=f"{config.BASELINE - best_val:+.4f} vs baseline {config.BASELINE}",
         delta_color="normal",
     )
 
 
 # ── Stage 1 ────────────────────────────────────────────────────
-stage_label.info(f"🔍 **Stage 1** — Fast Screen · 10% data · {N_BATCH} sandboxes per batch")
+stage_label.info(f"🔍 **Stage 1** — Fast Screen · 10% data · {config.N_BATCH} sandboxes per batch")
 all_s1 = []
 completed = 0
 
-for b in range(N_BATCHES):
-    configs = [orch.sample_params() for _ in range(N_BATCH)]
+for b in range(config.N_BATCHES):
+    configs = [sample_params() for _ in range(config.N_BATCH)]
     for r in stream_stage(configs, stage=1):
         all_s1.append(r)
         all_rows.append({**r, "stage": 1, "batch": b + 1})
@@ -102,7 +101,7 @@ if not all_s1:
     st.stop()
 
 all_s1.sort(key=lambda x: x["val_mae"])
-survivors_s2 = all_s1[:TOP_S2]
+survivors_s2 = all_s1[:config.TOP_S2]
 for seed in get_seed_params():
     survivors_s2.append({"val_mae": 0.0, "test_mae": 0.0, "params": seed})
 
@@ -120,7 +119,7 @@ if not s2_results:
     st.stop()
 
 s2_results.sort(key=lambda x: x["val_mae"])
-survivors_s3 = s2_results[:TOP_S3]
+survivors_s3 = s2_results[:config.TOP_S3]
 
 # ── Stage 3 ────────────────────────────────────────────────────
 stage_label.info(f"🏆 **Stage 3** — Full Training · 100% data · {len(survivors_s3)} sandboxes")
@@ -141,7 +140,7 @@ elapsed = int(time.time() - t_start)
 
 save_history({
     "timestamp":     datetime.now().isoformat(),
-    "model_type":    orch.MODEL_TYPE,
+    "model_type":    config.MODEL_TYPE,
     "n_trials":      n_total,
     "reasoning":     "dashboard run",
     "search_space":  "orchestrator default",
@@ -158,11 +157,11 @@ st.divider()
 st.subheader("Final Results")
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Best Test MAE",      f"{best['test_mae']:.4f}",
-            delta=f"{BASELINE - best['test_mae']:+.4f} EUR/MWh")
-col2.metric("Baseline (Optuna)",  f"{BASELINE}")
-col3.metric("Configs Explored",   n_total)
-col4.metric("Wall-clock Time",    f"{elapsed}s")
+col1.metric("Best Test MAE",     f"{best['test_mae']:.4f}",
+            delta=f"{config.BASELINE - best['test_mae']:+.4f} EUR/MWh")
+col2.metric("Baseline (Optuna)", f"{config.BASELINE}")
+col3.metric("Configs Explored",  n_total)
+col4.metric("Wall-clock Time",   f"{elapsed}s")
 
 st.subheader("Best Hyperparameters Found")
 st.json(best["params"])
