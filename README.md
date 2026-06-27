@@ -11,6 +11,10 @@ Built in **5 hours** for the [Daytona](https://daytona.io) Hackathon.
 **Baseline**: Optuna sequential search, 30 trials → test MAE **7.23 EUR/MWh**  
 **Result**: Daytona parallel Hyperband, 36 configs → test MAE **7.1754 EUR/MWh** ✅ (+0.76% improvement)
 
+**Hackathon submission**:
+- 🌐 [One-page Demo](https://hyperband-daytona-showcase.lovable.app/)
+- 📊 [Slides](https://canva.link/p3a5jsmz67q46rm)
+
 ---
 
 ## Development Journey
