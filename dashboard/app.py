@@ -1,4 +1,5 @@
 import sys, os, time
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 
@@ -9,6 +10,7 @@ from orchestrator import (
     stream_stage, get_seed_params,
     N_BATCH, N_BATCHES, TOP_S2, TOP_S3, BASELINE,
 )
+from agent.history import save as save_history
 
 st.set_page_config(
     page_title="Hyperband Dashboard",
@@ -136,6 +138,17 @@ if not s3_results:
 # ── Final results ───────────────────────────────────────────────
 best    = min(s3_results, key=lambda x: x["test_mae"])
 elapsed = int(time.time() - t_start)
+
+save_history({
+    "timestamp":     datetime.now().isoformat(),
+    "model_type":    orch.MODEL_TYPE,
+    "n_trials":      n_total,
+    "reasoning":     "dashboard run",
+    "search_space":  "orchestrator default",
+    "best_test_mae": best["test_mae"],
+    "best_val_mae":  best["val_mae"],
+    "best_params":   best["params"],
+})
 
 stage_label.success(f"✅ Search complete in {elapsed}s · {n_total} configs explored")
 progress_bar.progress(1.0)
