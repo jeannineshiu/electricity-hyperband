@@ -13,9 +13,45 @@ TOP_S2     = 5   # top configs advancing to Stage 2
 TOP_S3     = 5   # top configs advancing to Stage 3
 BASELINE   = 7.23
 
+# ── Model metadata: single source of truth for defaults and bounds ─────────
+# Imported by agent/ml_engineer.py — do not duplicate these elsewhere.
+
+MODEL_DEFAULTS = {
+    "lightgbm": {"random_state": 42, "n_jobs": -1, "verbose": -1},
+    "xgboost":  {"random_state": 42, "n_jobs": -1, "verbosity": 0},
+    "catboost": {"random_seed": 42, "bootstrap_type": "Bernoulli"},
+    "rf":       {"random_state": 42, "n_jobs": -1},
+}
+
+MODEL_BOUNDS = {
+    "lightgbm": {
+        "n_estimators": (100, 10000), "max_depth": (2, 12),
+        "learning_rate": (0.001, 0.5), "num_leaves": (5, 300),
+        "subsample": (0.3, 1.0), "colsample_bytree": (0.3, 1.0),
+        "min_child_samples": (1, 500),
+        "reg_alpha": (0.0, 20.0), "reg_lambda": (0.0, 20.0),
+    },
+    "xgboost": {
+        "n_estimators": (100, 5000), "max_depth": (2, 12),
+        "learning_rate": (0.001, 0.5), "subsample": (0.3, 1.0),
+        "colsample_bytree": (0.3, 1.0), "min_child_weight": (1, 50),
+        "gamma": (0.0, 5.0), "reg_alpha": (0.0, 20.0), "reg_lambda": (0.0, 20.0),
+    },
+    "catboost": {
+        "iterations": (100, 5000), "depth": (2, 12),
+        "learning_rate": (0.001, 0.5), "l2_leaf_reg": (0.1, 50.0),
+        "subsample": (0.3, 1.0), "rsm": (0.3, 1.0),
+    },
+    "rf": {
+        "n_estimators": (50, 2000), "max_depth": (2, 50),
+        "min_samples_split": (2, 50), "min_samples_leaf": (1, 50),
+    },
+}
+
 # ── Model-specific param samplers ─────────────────────────────
 def _sample_lightgbm():
     return {
+        **MODEL_DEFAULTS["lightgbm"],
         "n_estimators":      random.choice([1000, 1500, 2000, 3000, 5000]),
         "max_depth":         random.randint(3, 6),
         "learning_rate":     random.choice([0.003, 0.005, 0.01, 0.02, 0.03]),
@@ -25,11 +61,11 @@ def _sample_lightgbm():
         "min_child_samples": random.randint(20, 100),
         "reg_alpha":         round(random.uniform(0.0, 2.0), 2),
         "reg_lambda":        round(random.uniform(0.1, 2.0), 2),
-        "random_state": 42, "n_jobs": -1, "verbose": -1,
     }
 
 def _sample_xgboost():
     return {
+        **MODEL_DEFAULTS["xgboost"],
         "n_estimators":     random.choice([200, 400, 600, 800, 1000]),
         "max_depth":        random.randint(3, 8),
         "learning_rate":    random.choice([0.01, 0.05, 0.1, 0.2]),
@@ -39,29 +75,27 @@ def _sample_xgboost():
         "reg_alpha":        round(random.uniform(0.0, 1.0), 2),
         "reg_lambda":       round(random.uniform(0.1, 2.0), 2),
         "gamma":            round(random.uniform(0.0, 0.5), 2),
-        "random_state": 42, "n_jobs": -1, "verbosity": 0,
     }
 
 def _sample_catboost():
     return {
-        "iterations":     random.choice([200, 400, 600, 800]),
-        "depth":          random.randint(4, 10),
-        "learning_rate":  random.choice([0.01, 0.05, 0.1, 0.2]),
-        "l2_leaf_reg":    round(random.uniform(1.0, 10.0), 1),
-        "bootstrap_type": "Bernoulli",          # required for subsample to work
-        "subsample":      round(random.uniform(0.6, 1.0), 2),
-        "rsm":            round(random.uniform(0.6, 1.0), 2),
-        "random_seed": 42,
+        **MODEL_DEFAULTS["catboost"],
+        "iterations":    random.choice([200, 400, 600, 800]),
+        "depth":         random.randint(4, 10),
+        "learning_rate": random.choice([0.01, 0.05, 0.1, 0.2]),
+        "l2_leaf_reg":   round(random.uniform(1.0, 10.0), 1),
+        "subsample":     round(random.uniform(0.6, 1.0), 2),
+        "rsm":           round(random.uniform(0.6, 1.0), 2),
     }
 
 def _sample_rf():
     return {
+        **MODEL_DEFAULTS["rf"],
         "n_estimators":      random.choice([100, 200, 300, 500]),
         "max_depth":         random.choice([5, 10, 15, 20, None]),
         "min_samples_split": random.randint(2, 20),
         "min_samples_leaf":  random.randint(1, 10),
         "max_features":      random.choice(["sqrt", "log2", 0.5, 0.7]),
-        "random_state": 42, "n_jobs": -1,
     }
 
 _PARAM_SAMPLERS = {

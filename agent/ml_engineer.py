@@ -17,6 +17,7 @@ import anthropic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import orchestrator as orch
+from orchestrator import MODEL_DEFAULTS as _DEFAULTS, MODEL_BOUNDS as _BOUNDS
 from agent.history import load as load_history, save as save_history
 
 MODEL_ID = "claude-opus-4-8"
@@ -105,38 +106,7 @@ TOOLS = [
     }
 ]
 
-# ── Param bounds for validation ───────────────────────────────
-_BOUNDS = {
-    "lightgbm": {
-        "n_estimators": (100, 10000), "max_depth": (2, 12),
-        "learning_rate": (0.001, 0.5), "num_leaves": (5, 300),
-        "subsample": (0.3, 1.0), "colsample_bytree": (0.3, 1.0),
-        "min_child_samples": (1, 500),
-        "reg_alpha": (0.0, 20.0), "reg_lambda": (0.0, 20.0),
-    },
-    "xgboost": {
-        "n_estimators": (100, 5000), "max_depth": (2, 12),
-        "learning_rate": (0.001, 0.5), "subsample": (0.3, 1.0),
-        "colsample_bytree": (0.3, 1.0), "min_child_weight": (1, 50),
-        "gamma": (0.0, 5.0), "reg_alpha": (0.0, 20.0), "reg_lambda": (0.0, 20.0),
-    },
-    "catboost": {
-        "iterations": (100, 5000), "depth": (2, 12),
-        "learning_rate": (0.001, 0.5), "l2_leaf_reg": (0.1, 50.0),
-        "subsample": (0.3, 1.0), "rsm": (0.3, 1.0),
-    },
-    "rf": {
-        "n_estimators": (50, 2000), "max_depth": (2, 50),
-        "min_samples_split": (2, 50), "min_samples_leaf": (1, 50),
-    },
-}
-
-_DEFAULTS = {
-    "lightgbm": {"random_state": 42, "n_jobs": -1, "verbose": -1},
-    "xgboost":  {"random_state": 42, "n_jobs": -1, "verbosity": 0},
-    "catboost": {"random_seed": 42, "bootstrap_type": "Bernoulli"},
-    "rf":       {"random_state": 42, "n_jobs": -1},
-}
+# _BOUNDS and _DEFAULTS are imported from orchestrator — single source of truth
 
 
 def _validate_search_space(model_type: str, search_space: dict) -> list[str]:
